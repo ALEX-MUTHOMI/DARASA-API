@@ -24,7 +24,8 @@ urlpatterns = [
 
     # --- DARASA SAAS ROUTING ---
     path('api/billing/', include('billing.urls')),
-
+    path('api/checkout/', include('checkout.urls')),
+    path('api/v1/webhooks/', include('webhooks.urls')),
 ]
 if settings.DEBUG:
     # 1. Serve the Photobox Uploads
