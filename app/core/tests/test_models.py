@@ -53,36 +53,4 @@ class ModelTests(TestCase):
         self.assertEqual(workspace.brand_color, '#FF5733')
         self.assertFalse(workspace.is_deleted) # Proves SoftDeleteModel works
 
-    def test_gallery_pin_is_hashed(self):
-        """SECURITY: Test that the gallery PIN is mathematically hashed, not plaintext."""
-        user = create_user()
-        workspace = models.Workspace.objects.create(user=user, business_name='Apex')
 
-        raw_pin = '2026'
-        gallery = models.Gallery.objects.create(
-            workspace=workspace,
-            title='Wedding',
-            slug='wedding',
-            gallery_pin=raw_pin
-        )
-
-        # The stored pin MUST NOT be the raw pin
-        self.assertNotEqual(gallery.gallery_pin, raw_pin)
-        # UPDATE THIS LINE: The test now expects Argon2 (or legacy pbkdf2)
-        self.assertTrue(gallery.gallery_pin.startswith(('pbkdf2_', 'argon2')))
-        # The verify method must work
-        self.assertTrue(gallery.verify_pin(raw_pin))
-
-    def test_soft_delete_mechanic(self):
-        """Test that objects can be softly deleted without destroying the database row."""
-        user = create_user()
-        workspace = models.Workspace.objects.create(user=user, business_name='Apex')
-        gallery = models.Gallery.objects.create(workspace=workspace, title='Delete Me', slug='delete-me')
-
-        # Simulate a delete
-        gallery.is_deleted = True
-        gallery.save()
-
-        # The row still exists in the DB for data recovery, but is marked deleted
-        recovered_gallery = models.Gallery.objects.get(id=gallery.id)
-        self.assertTrue(recovered_gallery.is_deleted)

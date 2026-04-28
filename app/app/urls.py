@@ -22,18 +22,8 @@ urlpatterns = [
     ),
     path('api/user/', include('user.urls')),
 
-    # --- PHOTOBOX SAAS ROUTING ---
-    path('api/gallery/', include('gallery.urls')),
-    path('api/galleries/', include('gallery.client_urls')),
-
+    # --- DARASA SAAS ROUTING ---
     path('api/billing/', include('billing.urls')),
-
-    # Add this inside the urlpatterns list in app/urls.py:
-    path('api/checkout/', include('checkout.urls')),
-
-    # --- EDA ROUTES ---
-    path('api/v1/ingestion/', include('ingestion.urls')),
-    path('api/v1/webhooks/', include('webhooks.urls')),
 
 ]
 if settings.DEBUG:

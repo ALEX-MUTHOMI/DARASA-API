@@ -12,44 +12,7 @@ from django.contrib.auth.hashers import make_password, check_password
 from PIL import Image as PILImage
 from PIL import UnidentifiedImageError
 
-# --- SECURE FILE PATH GENERATORS ---
-def workspace_logo_file_path(instance, filename):
-    ext = os.path.splitext(filename)[1]
-    return os.path.join('uploads', 'workspace', 'logos', f'{uuid.uuid4()}{ext}')
 
-def workspace_watermark_file_path(instance, filename):
-    ext = os.path.splitext(filename)[1]
-    return os.path.join('uploads', 'workspace', 'watermarks', f'{uuid.uuid4()}{ext}')
-
-def workspace_image_file_path(instance, filename):
-    ext = os.path.splitext(filename)[1]
-    return os.path.join('uploads', 'workspace', str(instance.gallery.workspace.id), f'{uuid.uuid4()}{ext}')
-
-
-def validate_png_watermark(uploaded_file):
-    if not uploaded_file:
-        return
-
-    filename = (getattr(uploaded_file, 'name', '') or '').lower()
-    if not filename.endswith('.png'):
-        raise ValidationError("Watermark logo must use the .png extension.")
-
-    position = None
-    if hasattr(uploaded_file, 'tell'):
-        position = uploaded_file.tell()
-
-    try:
-        if hasattr(uploaded_file, 'seek'):
-            uploaded_file.seek(0)
-        with PILImage.open(uploaded_file) as image:
-            if image.format != 'PNG':
-                raise ValidationError("Watermark logo must be a valid PNG image.")
-            image.verify()
-    except (UnidentifiedImageError, OSError) as exc:
-        raise ValidationError("Watermark logo must be a valid PNG image.") from exc
-    finally:
-        if hasattr(uploaded_file, 'seek'):
-            uploaded_file.seek(position or 0)
 
 
 # ==========================================
@@ -139,18 +102,7 @@ class Workspace(SoftDeleteModel):
     custom_domain = models.CharField(max_length=255, blank=True, null=True, unique=True)
 
     # Frontend Branding
-    logo = models.ImageField(upload_to=workspace_logo_file_path, null=True, blank=True)
     brand_color = models.CharField(max_length=7, default='#000000')
-    watermark_logo = models.ImageField(
-        upload_to=workspace_watermark_file_path,
-        null=True,
-        blank=True,
-        validators=[validate_png_watermark],
-    )
-    watermark_opacity = models.PositiveSmallIntegerField(
-        default=35,
-        validators=[MinValueValidator(0), MaxValueValidator(100)],
-    )
 
     # --- EDA UPGRADE: The Atomic Quota Ledger ---
     # MinValueValidator enforces database-level integrity against negative storage hacks
@@ -161,42 +113,5 @@ class Workspace(SoftDeleteModel):
         return self.business_name
 
 
-# ==========================================
-# 4. APPLICATION RESOURCES (LEGACY SUPPORT)
-# ==========================================
-class Gallery(SoftDeleteModel):
-    """A collection of images with strict Client UX controls."""
-    workspace = models.ForeignKey(Workspace, on_delete=models.CASCADE, related_name='galleries')
-    title = models.CharField(max_length=255)
-    slug = models.SlugField(max_length=255, unique=True)
 
-    is_public = models.BooleanField(default=False)
-    gallery_pin = models.CharField(max_length=128, blank=True)
-    expires_at = models.DateTimeField(null=True, blank=True)
-    allow_downloads = models.BooleanField(default=False)
-
-    def save(self, *args, **kwargs):
-        if self.gallery_pin and not self.gallery_pin.startswith(('pbkdf2_', 'argon2')):
-            self.gallery_pin = make_password(self.gallery_pin)
-        super().save(*args, **kwargs)
-
-    def verify_pin(self, raw_pin):
-        return check_password(raw_pin, self.gallery_pin)
-
-    def __str__(self):
-        return self.title
-
-class Image(SoftDeleteModel):
-    """Individual photo files (Legacy)."""
-    gallery = models.ForeignKey(Gallery, on_delete=models.CASCADE, related_name='images')
-    title = models.CharField(max_length=255, blank=True)
-    image = models.ImageField(upload_to=workspace_image_file_path)
-    file_size_bytes = models.BigIntegerField(default=0)
-    order = models.IntegerField(default=0)
-
-    class Meta:
-        ordering = ['order', '-created_at']
-
-    def __str__(self):
-        return self.title if self.title else str(self.id)
 

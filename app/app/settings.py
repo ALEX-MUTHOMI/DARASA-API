@@ -150,11 +150,7 @@ INSTALLED_APPS = [
     # First-party
     'core',
     'user',
-    'gallery',
     'billing',
-    'checkout',
-    'ingestion',
-    'webhooks',
 ]
 
 
@@ -302,11 +298,7 @@ REST_FRAMEWORK = {
     'DEFAULT_THROTTLE_RATES': {
         'anon': '5/minute',
         'user': '1000/day',
-        'fast_lane_upload': '30/minute',
-        'heavy_lane_ticket': '10/minute',
         'magic_link_send': '3/minute',
-        'guest_access': '10/minute',
-        'favorite_selection': '30/minute',
         'password_reset_request': '3/minute',
     },
 }
@@ -329,12 +321,6 @@ SIMPLE_JWT = {
     # from a too-short SECRET_KEY in test/CI environments.
     'SIGNING_KEY': os.environ.get('JWT_SIGNING_KEY', SECRET_KEY),
 }
-
-GALLERY_ACCESS_COOKIE_NAME = os.environ.get('GALLERY_ACCESS_COOKIE_NAME', 'gallery_access')
-GALLERY_ACCESS_COOKIE_SAMESITE = os.environ.get('GALLERY_ACCESS_COOKIE_SAMESITE', 'Lax')
-GALLERY_ACCESS_TOKEN_LIFETIME_SECONDS = int(
-    os.environ.get('GALLERY_ACCESS_TOKEN_LIFETIME_SECONDS', 3600)
-)
 
 
 # ============================================================
@@ -388,28 +374,12 @@ CORS_ALLOW_HEADERS = [
 
 
 # ============================================================
-# 16. CLOUDFLARE R2 STORAGE
+# 16. CLOUDFLARE R2 STORAGE (REMOVED)
 # ============================================================
-# IAM credentials MUST be scoped to s3:PutObject + s3:GetObject only.
-# Never grant s3:DeleteObject, s3:ListBucket, or s3:PutBucketPolicy.
-CLOUDFLARE_R2_ENDPOINT          = os.environ.get('CLOUDFLARE_R2_ENDPOINT', '')
-CLOUDFLARE_R2_BUCKET_NAME       = os.environ.get('CLOUDFLARE_R2_BUCKET_NAME', '')
-CLOUDFLARE_R2_DOMAIN            = os.environ.get('CLOUDFLARE_R2_DOMAIN', '')
-CLOUDFLARE_ACCESS_KEY_ID        = os.environ.get('CLOUDFLARE_ACCESS_KEY_ID', '')
-CLOUDFLARE_SECRET_ACCESS_KEY    = os.environ.get('CLOUDFLARE_SECRET_ACCESS_KEY', '')
-CLOUDFLARE_WEBHOOK_SECRET       = os.environ.get('CLOUDFLARE_WEBHOOK_SECRET', '')
-CLOUDFLARE_R2_DELETE_ENDPOINT   = os.environ.get('CLOUDFLARE_R2_DELETE_ENDPOINT', '')
-CLOUDFLARE_R2_DELETE_BUCKET_NAME = os.environ.get('CLOUDFLARE_R2_DELETE_BUCKET_NAME', '')
-CLOUDFLARE_R2_DELETE_ACCESS_KEY_ID = os.environ.get('CLOUDFLARE_R2_DELETE_ACCESS_KEY_ID', '')
-CLOUDFLARE_R2_DELETE_SECRET_ACCESS_KEY = os.environ.get('CLOUDFLARE_R2_DELETE_SECRET_ACCESS_KEY', '')
-
 
 # ============================================================
-# 17. CLOUDINARY (CDN FETCH PROXY — NO SDK UPLOADS)
+# 17. CLOUDINARY (REMOVED)
 # ============================================================
-# Cloudinary acts as transform + cache layer only.
-# It fetches originals from R2 on first request and serves WebP to clients.
-CLOUDINARY_CLOUD_NAME = os.environ.get('CLOUDINARY_CLOUD_NAME', '')
 
 
 # ============================================================
@@ -433,7 +403,7 @@ EMAIL_PORT        = int(os.environ.get('EMAIL_PORT', 587))
 EMAIL_USE_TLS     = True
 EMAIL_HOST_USER   = os.environ.get('EMAIL_HOST_USER', '')
 EMAIL_HOST_PASSWORD = os.environ.get('EMAIL_HOST_PASSWORD', '')
-DEFAULT_FROM_EMAIL  = os.environ.get('DEFAULT_FROM_EMAIL', 'PhotoBox <no-reply@photobox.app>')
+DEFAULT_FROM_EMAIL  = os.environ.get('DEFAULT_FROM_EMAIL', 'Darasa <no-reply@darasa.app>')
 
 
 # ============================================================
@@ -448,20 +418,9 @@ CELERY_TIMEZONE          = 'UTC'
 
 
 # ============================================================
-# 21. GALLERY BUSINESS RULES
+# 21. BUSINESS RULES
 # ============================================================
-# TTL in days per subscription tier.  0 = unlimited (Enterprise).
-# Enforced by the nightly Celery Beat purge task.
-GALLERY_TTL_DAYS = {
-    'FREE':       30,
-    'PRO':        365,
-    'ENTERPRISE': 0,
-}
-GALLERY_ARCHIVE_TTL_HOURS = int(os.environ.get('GALLERY_ARCHIVE_TTL_HOURS', 24))
 CURRENT_TOS_VERSION = os.environ.get('CURRENT_TOS_VERSION', '2026-04')
-
-# GDPR: soft-delete on expiry, then hard-delete from R2 after this grace period.
-GALLERY_HARD_DELETE_GRACE_DAYS = 30
 
 
 # ============================================================
@@ -494,11 +453,7 @@ LOGGING = {
     'loggers': {
         'django':    {'handlers': ['console'], 'level': os.getenv('DJANGO_LOG_LEVEL', 'INFO'), 'propagate': False},
         'core':      {'handlers': ['console'], 'level': 'INFO', 'propagate': False},
-        'gallery':   {'handlers': ['console'], 'level': 'INFO', 'propagate': False},
         'billing':   {'handlers': ['console'], 'level': 'INFO', 'propagate': False},
-        'ingestion': {'handlers': ['console'], 'level': 'INFO', 'propagate': False},
-        'webhooks':  {'handlers': ['console'], 'level': 'INFO', 'propagate': False},
-        'checkout':  {'handlers': ['console'], 'level': 'INFO', 'propagate': False},
     },
 }
 
@@ -522,7 +477,7 @@ if SENTRY_DSN:
             LoggingIntegration(level=None, event_level='ERROR'),
         ],
         traces_sample_rate=float(os.environ.get('SENTRY_TRACES_SAMPLE_RATE', '0.2')),
-        release=os.environ.get('APP_VERSION', 'photobox-api@dev'),
+        release=os.environ.get('APP_VERSION', 'darasa-api@dev'),
         environment=os.environ.get('SENTRY_ENVIRONMENT', 'development'),
         send_default_pii=False,   # GDPR: never send passwords / tokens to Sentry
         before_send=sentry_before_send,
@@ -573,13 +528,6 @@ if _IS_TEST:
     # -- External service stubs --
     # Real values are used if present in the environment (e.g. integration CI).
     # Safe dummies are the fallback so the unit-test suite needs zero .env setup.
-    CLOUDFLARE_WEBHOOK_SECRET        = os.environ.get('CLOUDFLARE_WEBHOOK_SECRET',        'test-webhook-secret')
-    CLOUDFLARE_R2_ENDPOINT           = os.environ.get('CLOUDFLARE_R2_ENDPOINT',           'https://test.r2.cloudflarestorage.com')
-    CLOUDFLARE_R2_BUCKET_NAME        = os.environ.get('CLOUDFLARE_R2_BUCKET_NAME',        'test-bucket')
-    CLOUDFLARE_R2_DOMAIN             = os.environ.get('CLOUDFLARE_R2_DOMAIN',             'test-r2-domain.example.com')
-    CLOUDFLARE_ACCESS_KEY_ID         = os.environ.get('CLOUDFLARE_ACCESS_KEY_ID',         'test-key-id')
-    CLOUDFLARE_SECRET_ACCESS_KEY     = os.environ.get('CLOUDFLARE_SECRET_ACCESS_KEY',     'test-secret-key')
-    CLOUDINARY_CLOUD_NAME            = os.environ.get('CLOUDINARY_CLOUD_NAME',            'test-cloud')
     LEMON_SQUEEZY_API_KEY            = os.environ.get('LEMON_SQUEEZY_API_KEY',            'test-ls-api-key')
     LEMON_SQUEEZY_STORE_ID           = os.environ.get('LEMON_SQUEEZY_STORE_ID',           '1')
     LEMON_SQUEEZY_WEBHOOK_SECRET_PRIMARY   = os.environ.get('LEMON_SQUEEZY_WEBHOOK_SECRET_PRIMARY',   'test-ls-webhook-secret')
