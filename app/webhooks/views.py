@@ -2,15 +2,11 @@ import json
 import logging
 
 from django.conf import settings
-from django.db import transaction
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 
 from core.security import verify_webhook_signature, verify_webhook_timestamp
-# Import the aliased MediaAsset from gallery
-from gallery.models import MediaAsset
-from gallery.tasks import generate_photo_web_derivative
 
 logger = logging.getLogger(__name__)
 _MAX_WEBHOOK_PAYLOAD_BYTES = 5 * 1024 * 1024
@@ -19,15 +15,13 @@ _WEBHOOK_REPLAY_WINDOW_SECONDS = getattr(settings, "WEBHOOK_REPLAY_WINDOW_SECOND
 class CloudflareWebhookView(APIView):
     """
     Ingests Cloudflare R2 webhooks.
-    Validates timestamp-bound HMAC signatures and updates MediaAsset state.
+    Validates timestamp-bound HMAC signatures.
+    Domain-specific asset logic has been purged for Darasa API pivot.
     """
     authentication_classes = [] # Disable global auth
     permission_classes = []     # Disable global permissions
     throttle_classes = []       # Disable rate limiting for webhooks (Cloudflare IPs)
 
-    # Optional: If you want to use a custom parser to ensure you always get bytes:
-    # However, request.body is always available in DRF.
-    
     def post(self, request, *args, **kwargs):
         # 1. Size Limit before parsing (Memory Exhaustion DoS Protection)
         content_length = request.META.get('CONTENT_LENGTH')
@@ -84,46 +78,11 @@ class CloudflareWebhookView(APIView):
 
         action = payload.get('action')
         r2_object_key = payload.get('r2_object_key')
-        size = payload.get('size')
 
         # 7. Action Filter
         if action != 'PutObject':
             logger.info(f"Ignoring non-PutObject action: {action}")
             return Response({"status": "ignored"}, status=status.HTTP_200_OK)
 
-        # 8. Ghost File Tolerance
-        try:
-            asset = MediaAsset.objects.get(r2_object_key=r2_object_key)
-        except MediaAsset.DoesNotExist:
-            logger.warning(f"Webhook received for unknown object key: {r2_object_key}")
-            # Return 200 OK to prevent Cloudflare retry storms
-            return Response({"status": "ignored"}, status=status.HTTP_200_OK)
-
-        # 9. Quota / Size Mismatch Quarantine
-        # Check against integer size in DB to prevent unexpected scaling errors
-        expected_size = asset.file_size_bytes or 0
-        if size and int(size) > expected_size:
-            logger.error(f"Asset size mismatch for {r2_object_key}. Expected: {expected_size}, Got: {size}")
-            asset.status = "QUARANTINED"
-            asset.save(update_fields=['status'])
-            return Response({"status": "quarantined"}, status=status.HTTP_200_OK)
-
-        # 10. Update state atomically
-        with transaction.atomic():
-            locked_asset = MediaAsset.objects.select_for_update().get(pk=asset.pk)
-
-            if locked_asset.status == "READY" and locked_asset.is_processed:
-                logger.info("Asset %s already READY. Idempotent skip.", r2_object_key)
-                if locked_asset.media_type == "IMAGE":
-                    generate_photo_web_derivative.delay(str(locked_asset.id))
-                return Response({"status": "already_ready"}, status=status.HTTP_200_OK)
-
-            if locked_asset.status != "QUARANTINED":
-                locked_asset.status = "READY"
-                locked_asset.is_processed = True
-                locked_asset.save(update_fields=['status', 'is_processed'])
-
-        if asset.media_type == "IMAGE":
-            generate_photo_web_derivative.delay(str(asset.id))
-        logger.info("Asset %s successfully marked as READY", r2_object_key)
+        logger.info("Webhook successfully validated for %s. Awaiting new school domain models.", r2_object_key)
         return Response({"status": "success"}, status=status.HTTP_200_OK)
