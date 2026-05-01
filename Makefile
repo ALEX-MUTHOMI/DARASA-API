@@ -1,94 +1,151 @@
 # ─────────────────────────────────────────────────────────────────────────────
-# Makefile — Enterprise test runner commands
-# ─────────────────────────────────────────────────────────────────────────────
+# Makefile — Darasa-Core ERP
+# Back To Front Development
 #
-# Usage:
-#   make test-unit          → fast, no external services (CI/pre-commit)
-#   make test-celery        → Celery tasks in eager mode
-#   make test-cloudinary    → real Cloudinary API (needs env vars)
-#   make test-cloudflare    → real Cloudflare Worker (needs staging URL)
-#   make test-e2e           → full photographer flow against staging
-#   make test-all           → everything
-#   make test-coverage      → unit + integration with coverage report
-#
-# Required environment variables for integration/E2E tests:
-#   CLOUDINARY_CLOUD_NAME
-#   CLOUDINARY_API_KEY
-#   CLOUDINARY_API_SECRET
-#   CLOUDFLARE_WORKER_URL
-#   CF_TEST_TOKEN
-#   CELERY_BROKER_URL
-#   STAGING_BASE_URL
-#   E2E_PHOTOGRAPHER_USERNAME
-#   E2E_PHOTOGRAPHER_PASSWORD
+# All commands run through Docker Compose — no local django-admin ever.
+# DETERMINISM FIRST: the Docker environment is the only valid runtime.
 # ─────────────────────────────────────────────────────────────────────────────
 
-.PHONY: test-unit test-celery test-cloudinary test-cloudflare test-e2e test-all test-coverage
+.PHONY: help build up down logs shell \
+        scaffold purge \
+        migrate makemigrations createsuperuser \
+        test-unit test-integration test-security test-chaos \
+        test-celery test-mutation test-coverage test-flake8 test-all
 
-# Unit tests only — no external services, no broker — safe for pre-commit hooks
+# Capture host UID/GID for the Docker permission fix in scaffold scripts.
+# These are injected into the container so chown can restore ownership
+# of Django-generated files back to the host user (prevents root-locked files).
+HOST_UID := $(shell id -u)
+HOST_GID := $(shell id -g)
+
+# ── Default target ────────────────────────────────────────────────────────────
+help:
+	@echo ""
+	@echo "  Darasa-Core — Available Commands"
+	@echo "  ─────────────────────────────────────────────────────────"
+	@echo "  Infrastructure:"
+	@echo "    make build           — Build all Docker images"
+	@echo "    make up              — Start the full dev stack"
+	@echo "    make down            — Tear down the stack + volumes"
+	@echo "    make logs            — Tail all service logs"
+	@echo "    make shell           — Open a shell inside the app container"
+	@echo ""
+	@echo "  Migrations:"
+	@echo "    make migrate         — Run shared schema migrations"
+	@echo "    make makemigrations  — Generate new migration files"
+	@echo ""
+	@echo "  Test Suites:"
+	@echo "    make test-unit       — Pure unit tests (no DB, fast)"
+	@echo "    make test-integration — DB + Redis integration tests"
+	@echo "    make test-security   — IDOR / tenant isolation / JWT attacks"
+	@echo "    make test-chaos      — Toxiproxy fault injection"
+	@echo "    make test-celery     — Celery task pipeline"
+	@echo "    make test-mutation   — mutmut mutation testing baseline"
+	@echo "    make test-coverage   — Full suite + HTML coverage report"
+	@echo "    make test-flake8     — Lint"
+	@echo "    make test-all        — Everything"
+	@echo ""
+
+
+# ── Infrastructure ────────────────────────────────────────────────────────────
+build:
+	docker compose build --parallel
+
+up:
+	docker compose up
+
+down:
+	docker compose down -v --remove-orphans
+
+logs:
+	docker compose logs -f
+
+shell:
+	docker compose exec app /bin/sh
+
+
+# ── Project Scaffolding ───────────────────────────────────────────────────────
+#
+# SCAFFOLD: Full bootstrap sequence (run once at project initialization).
+#   1. Spins up an ephemeral app container (--rm = auto-removed after exit)
+#   2. Injects HOST_UID / HOST_GID so chown restores ownership of generated files
+#   3. Runs purge_legacy.sh then scaffold_domains.sh in sequence
+#
+# WHY -e HOST_UID / HOST_GID?
+#   Django-generated files inside Docker are owned by root (UID 0).
+#   Without injecting the host UID, the developer cannot edit the generated
+#   files without sudo. scaffold_domains.sh uses these for the final chown step.
+scaffold: build
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	@echo "  Darasa-Core — Full Scaffold Sequence"
+	@echo "  Phase: Purge Legacy → Initialize Project → Scaffold Domains"
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	docker compose run --rm \
+		-e HOST_UID=$(HOST_UID) \
+		-e HOST_GID=$(HOST_GID) \
+		app bash -c " \
+			set -eo pipefail && \
+			chmod +x /scripts/purge_legacy.sh /scripts/scaffold_domains.sh && \
+			echo '[SCAFFOLD] Step 1/2: Purging legacy domains...' && \
+			bash /scripts/purge_legacy.sh && \
+			echo '[SCAFFOLD] Step 2/2: Scaffolding Darasa-Core domains...' && \
+			bash /scripts/scaffold_domains.sh \
+		"
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	@echo "  ✅ Scaffold complete. Next: make migrate"
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+# PURGE ONLY: remove legacy apps without scaffolding new ones
+purge: build
+	docker compose run --rm \
+		-e HOST_UID=$(HOST_UID) \
+		-e HOST_GID=$(HOST_GID) \
+		app bash -c " \
+			chmod +x /scripts/purge_legacy.sh && \
+			bash /scripts/purge_legacy.sh \
+		"
+
+
+# ── Database ──────────────────────────────────────────────────────────────────
+migrate:
+	docker compose run --rm app python manage.py migrate_schemas --shared --no-input
+
+makemigrations:
+	docker compose run --rm app python manage.py makemigrations $(filter-out $@,$(MAKECMDGOALS))
+
+createsuperuser:
+	docker compose run --rm app python manage.py createsuperuser
+
+
+# ── Test Suites ───────────────────────────────────────────────────────────────
 test-unit:
-	pytest tests/ -m "unit" \
-		--timeout=10 \
-		-v \
-		--tb=short
+	docker compose run --rm test unit
 
-# Celery tasks in eager mode (synchronous, no broker needed)
-test-celery-unit:
-	pytest tests/test_celery_tasks.py -m "celery and unit" \
-		--timeout=30 \
-		-v
+test-integration:
+	docker compose run --rm test integration
 
-# Celery integration — requires running Redis
-test-celery-integration:
-	pytest tests/test_celery_tasks.py -m "celery and integration" \
-		--timeout=120 \
-		-v
+test-security:
+	docker compose run --rm test security
 
-# Cloudinary — hits the real API, creates and deletes real resources
-test-cloudinary:
-	pytest tests/test_cloudinary_integration.py -m cloudinary \
-		--timeout=60 \
-		-v \
-		-s
+test-chaos:
+	docker compose run --rm test chaos
 
-# Cloudflare — hits the real staging Worker
-test-cloudflare:
-	pytest tests/test_cloudflare_integration.py -m cloudflare \
-		--timeout=60 \
-		-v \
-		-s
+test-celery:
+	docker compose run --rm test celery
 
-# Full E2E — the real photographer flow against staging
-test-e2e:
-	pytest tests/test_e2e_photographer_flow.py -m e2e \
-		--timeout=180 \
-		-v \
-		-s
+test-mutation:
+	docker compose run --rm test mutation
 
-# API layer tests (unit + schema + auth — mocks external calls)
-test-api:
-	pytest tests/test_api_upload.py \
-		--timeout=30 \
-		-v
-
-# Everything
-test-all:
-	pytest tests/ \
-		--timeout=180 \
-		-v
-
-# Coverage report (unit + API tests — not integration to avoid flakiness in CI)
 test-coverage:
-	pytest tests/test_api_upload.py tests/test_celery_tasks.py \
-		-m "unit or (celery and unit)" \
-		--cov=photos \
-		--cov-report=term-missing \
-		--cov-report=html:htmlcov \
-		--cov-fail-under=80 \
-		--timeout=30
+	docker compose run --rm test coverage
 
-# Parallel execution (faster for large test suites)
-test-parallel:
-	pytest tests/ -m "unit" \
-		-n auto \
-		--timeout=30
+test-flake8:
+	docker compose run --rm test flake8
+
+test-all:
+	docker compose run --rm test all
+
+# ── Utility ───────────────────────────────────────────────────────────────────
+# Allow passing arguments to makemigrations without make errors
+%:
+	@:

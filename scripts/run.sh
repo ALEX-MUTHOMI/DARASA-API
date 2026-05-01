@@ -1,22 +1,35 @@
 #!/bin/sh
-
+# ─────────────────────────────────────────────────────────────────────────────
+# run.sh — Darasa-Core production entrypoint
+# Back To Front Development
+#
+# Executed as CMD inside the Docker container for the `app` service.
+# For the `celery` service, docker-compose.yml overrides CMD directly.
+# ─────────────────────────────────────────────────────────────────────────────
 set -e
 
-# 1. Boot sequence
-echo "[INFO] Waiting for database..."
-python manage.py wait_for_db
-echo "[INFO] Applying migrations..."
-python manage.py migrate
-echo "[INFO] Collecting static files..."
-python manage.py collectstatic --noinput
+echo "[INFO] Starting Darasa-Core..."
+echo "[INFO] Python: $(python --version)"
+echo "[INFO] Django: $(python -c 'import django; print(django.__version__)')"
 
-# 2. Start uWSGI
-# We use --http :8000 so the container is reachable by the health check 
-# and the external ports. In production, Nginx will talk to this.
-echo "[INFO] Starting uWSGI in development mode..."
-exec uwsgi --master \
-           --http :8000 \
-           --workers 4 \
-           --enable-threads \
-           --module app.wsgi \
-           --buffer-size 32768
+# Wait for DB to be reachable before running gunicorn
+python manage.py wait_for_db
+
+# Migrate shared schema (public schema — tenant registry, billing, etc.)
+python manage.py migrate_schemas --shared --no-input
+
+# Collect static files for Nginx/CDN serving
+python manage.py collectstatic --no-input
+
+echo "[INFO] Launching Gunicorn..."
+exec gunicorn \
+    darasa_project.wsgi:application \
+    --bind 0.0.0.0:8000 \
+    --workers "${GUNICORN_WORKERS:-4}" \
+    --worker-class sync \
+    --timeout "${GUNICORN_TIMEOUT:-30}" \
+    --max-requests 1000 \
+    --max-requests-jitter 100 \
+    --log-level info \
+    --access-logfile - \
+    --error-logfile -

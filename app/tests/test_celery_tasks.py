@@ -1,1 +1,0 @@
-# Cleared legacy celery tests

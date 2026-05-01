@@ -1,20 +1,24 @@
 #!/bin/sh
 # ─────────────────────────────────────────────────────────────────────────────
-# PhotoBox Enterprise Test Runner
+# Darasa-Core Enterprise Test Runner
+# Back To Front Development
 #
 # Usage (via Docker Compose):
-#   docker compose run --rm test unit       — fast unit + security tests
-#   docker compose run --rm test api        — API integration tests
-#   docker compose run --rm test celery     — Celery pipeline tests
-#   docker compose run --rm test security   — security-only tests
-#   docker compose run --rm test cloudinary — Cloudinary integration (needs creds)
-#   docker compose run --rm test e2e        — End-to-end photographer flow
-#   docker compose run --rm test coverage   — Full suite with coverage report
-#   docker compose run --rm test all        — Everything
+#   docker compose run --rm test unit        — fast unit tests (no external services)
+#   docker compose run --rm test integration — DB + Redis integration tests
+#   docker compose run --rm test security    — adversarial / IDOR / isolation tests
+#   docker compose run --rm test chaos       — Toxiproxy fault-injection tests
+#   docker compose run --rm test celery      — Celery task pipeline tests
+#   docker compose run --rm test mutation    — mutmut mutation testing baseline
+#   docker compose run --rm test coverage    — full suite with coverage report
+#   docker compose run --rm test flake8      — lint
+#   docker compose run --rm test all         — everything
 # ─────────────────────────────────────────────────────────────────────────────
 set -e
 
 SUITE="${1:-unit}"
+
+# Pass-through: allows raw pytest/python commands for quick debugging
 if [ "$SUITE" = "pytest" ] || [ "$SUITE" = "python" ]; then
   echo "[INFO] Raw command passthrough: $*"
   exec "$@"
@@ -24,10 +28,12 @@ shift 1 || true
 EXTRA_ARGS="$@"
 
 echo "================================================================"
-echo "  PhotoBox Enterprise Test Runner"
+echo "  Darasa-Core Enterprise Test Runner"
 echo "  Suite    : $SUITE"
 echo "  Extra    : $EXTRA_ARGS"
 echo "  Workdir  : $(pwd)"
+echo "  Python   : $(python --version)"
+echo "  Pytest   : $(python -m pytest --version)"
 echo "================================================================"
 
 # Clean stale bytecode — prevents ghost failures from cached .pyc files
@@ -35,17 +41,16 @@ find . -name "*.pyc" -delete 2>/dev/null || true
 find . -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
 rm -rf .pytest_cache 2>/dev/null || true
 
-echo "[INFO] Python  : $(python --version)"
-echo "[INFO] Pytest  : $(python -m pytest --version)"
 echo ""
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Wait for database to be ready before running any tests
+# Wait for the database before running any suite that needs DB access
 # ─────────────────────────────────────────────────────────────────────────────
-echo "[INFO] Waiting for database..."
-python -c "
+_wait_for_db() {
+  echo "[INFO] Waiting for database..."
+  python -c "
 import os, sys, time, django
-os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'app.settings')
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'darasa_project.settings')
 django.setup()
 from django.db import connections
 from django.db.utils import OperationalError
@@ -60,132 +65,118 @@ for i in range(30):
 print('[ERROR] Database not available after 60s.')
 sys.exit(1)
 "
+}
 
-# Run migrations to ensure schema is current
-echo "[INFO] Running migrations..."
-TMP_ROOT="${TMPDIR:-/var/tmp}"
-mkdir -p "$TMP_ROOT"
-MIGRATE_LOG="$TMP_ROOT/photobox-migrate-$$.log"
-if ! python manage.py migrate --run-syncdb --no-input >"$MIGRATE_LOG" 2>&1; then
-  tail -20 "$MIGRATE_LOG"
+# ─────────────────────────────────────────────────────────────────────────────
+# Run shared schema migrations (public schema only — tenant schemas
+# are migrated per-tenant on onboarding, not globally here)
+# ─────────────────────────────────────────────────────────────────────────────
+_run_migrations() {
+  echo "[INFO] Running shared schema migrations..."
+  TMP_ROOT="${TMPDIR:-/var/tmp}"
+  mkdir -p "$TMP_ROOT"
+  MIGRATE_LOG="$TMP_ROOT/darasa-migrate-$$.log"
+  if ! python manage.py migrate_schemas --shared --no-input >"$MIGRATE_LOG" 2>&1; then
+    tail -20 "$MIGRATE_LOG"
+    rm -f "$MIGRATE_LOG"
+    exit 1
+  fi
+  tail -5 "$MIGRATE_LOG"
   rm -f "$MIGRATE_LOG"
-  exit 1
-fi
-tail -5 "$MIGRATE_LOG"
-rm -f "$MIGRATE_LOG"
-
-echo ""
+  echo ""
+}
 
 case "$SUITE" in
 
-  # ── UNIT: fast, no external services ─────────────────────────────────────
+  # ── UNIT: pure logic, no DB, no network ─────────────────────────────────
   unit)
-    echo "[RUNNING] Unit + integration tests (all app domains)..."
+    echo "[RUNNING] Unit tests (no external services required)..."
     exec python -m pytest \
-      core/tests/ \
-      gallery/tests/ \
-      billing/tests/ \
-      user/tests/ \
-      webhooks/tests/ \
-      tests/ \
-      --timeout=60 -v --tb=short \
-      --ignore=tests/test_cloudinary_integration.py \
-      --ignore=tests/test_e2e_photographer_flow.py \
+      -m "unit" \
+      --timeout=30 -v --tb=short \
       $EXTRA_ARGS
     ;;
 
-  # ── API: HTTP integration tests ───────────────────────────────────────────
-  api)
-    echo "[RUNNING] API integration tests..."
+  # ── INTEGRATION: requires DB + Redis ────────────────────────────────────
+  integration)
+    _wait_for_db
+    _run_migrations
+    echo "[RUNNING] Integration tests (DB + Redis)..."
     exec python -m pytest \
-      gallery/tests/ \
-      billing/tests/ \
-      user/tests/ \
-      webhooks/tests/ \
-      tests/test_api_upload.py \
-      --timeout=60 -v --tb=short $EXTRA_ARGS
+      -m "integration" \
+      --timeout=60 -v --tb=short \
+      $EXTRA_ARGS
     ;;
 
-  # ── SECURITY: IDOR, tenant isolation, webhook, OAuth ─────────────────────
+  # ── SECURITY: IDOR, tenant isolation, JWT attacks, schema leakage ───────
   security)
+    _wait_for_db
+    _run_migrations
     echo "[RUNNING] Security test suite..."
     exec python -m pytest \
-      gallery/tests/test_tenant_isolation.py \
-      gallery/tests/test_storage_unit.py \
-      gallery/tests/test_presigned_url_security.py \
-      gallery/tests/test_security_cloud.py \
-      gallery/tests/test_download_authorization.py \
-      gallery/tests/test_asset_hardening.py \
-      billing/tests/test_security.py \
-      billing/tests/test_audit_immutability.py \
-      core/tests/test_auth_jwt.py \
-      user/tests/test_social_adapter.py \
-      user/tests/test_user_api.py \
-      webhooks/tests/test_r2_webhook.py \
-      --timeout=60 -v --tb=short $EXTRA_ARGS
+      -m "security" \
+      --timeout=60 -v --tb=short \
+      $EXTRA_ARGS
     ;;
 
-  # ── CELERY: task pipeline tests ───────────────────────────────────────────
+  # ── CHAOS: Toxiproxy network fault injection ─────────────────────────────
+  chaos)
+    _wait_for_db
+    _run_migrations
+    echo "[RUNNING] Chaos / fault-injection tests (via Toxiproxy)..."
+    exec python -m pytest \
+      -m "chaos" \
+      --timeout=120 -v --tb=short \
+      $EXTRA_ARGS
+    ;;
+
+  # ── CELERY: task pipeline tests ──────────────────────────────────────────
   celery)
+    _wait_for_db
+    _run_migrations
     echo "[RUNNING] Celery pipeline tests..."
     exec python -m pytest \
-      tests/test_celery_tasks.py \
-      tests/test_pipeline_integrity.py \
-      --timeout=60 -v --tb=short $EXTRA_ARGS
+      -m "celery" \
+      --timeout=60 -v --tb=short \
+      $EXTRA_ARGS
     ;;
 
-  # ── CLOUDINARY: requires real credentials ─────────────────────────────────
-  cloudinary)
-    echo "[RUNNING] Cloudinary integration tests (requires real creds)..."
-    exec python -m pytest \
-      tests/test_cloudinary_integration.py \
-      -m cloudinary --timeout=120 -v -s $EXTRA_ARGS
+  # ── MUTATION: mutmut baseline mutation testing ───────────────────────────
+  mutation)
+    echo "[RUNNING] Mutation testing baseline (mutmut)..."
+    exec python -m mutmut run \
+      --paths-to-mutate darasa_project/ \
+      --runner "python -m pytest -x -q" \
+      $EXTRA_ARGS
     ;;
 
-  # ── E2E: full photographer flow ───────────────────────────────────────────
-  e2e)
-    echo "[RUNNING] End-to-end photographer flow..."
-    exec python -m pytest \
-      tests/test_e2e_photographer_flow.py \
-      -m e2e --timeout=300 -v -s $EXTRA_ARGS
-    ;;
-
-  # ── COVERAGE: full suite with HTML report ────────────────────────────────
+  # ── COVERAGE: full suite with HTML + term report ─────────────────────────
   coverage)
-    echo "[RUNNING] Coverage analysis..."
+    _wait_for_db
+    _run_migrations
+    echo "[RUNNING] Coverage analysis (full suite)..."
     exec python -m pytest \
-      core/tests/ \
-      gallery/tests/ \
-      billing/tests/ \
-      user/tests/ \
-      webhooks/tests/ \
-      tests/ \
       --cov=. \
       --cov-report=term-missing \
       --cov-report=html:htmlcov \
-      --cov-fail-under=70 \
+      --cov-fail-under=80 \
       --timeout=120 -v --tb=short \
-      --ignore=tests/test_cloudinary_integration.py \
-      --ignore=tests/test_e2e_photographer_flow.py \
       $EXTRA_ARGS
     ;;
 
-  # ── ALL: everything including integration ────────────────────────────────
+  # ── ALL: everything ───────────────────────────────────────────────────────
   all)
+    _wait_for_db
+    _run_migrations
     echo "[RUNNING] Full system suite..."
     exec python -m pytest \
-      core/tests/ \
-      gallery/tests/ \
-      billing/tests/ \
-      user/tests/ \
-      webhooks/tests/ \
-      tests/ \
-      --timeout=180 -v --tb=short $EXTRA_ARGS
+      --timeout=180 -v --tb=short \
+      $EXTRA_ARGS
     ;;
 
-  # ── FLAKE8: linting ──────────────────────────────────────────────────────
+  # ── FLAKE8: lint ──────────────────────────────────────────────────────────
   flake8)
-    echo "[RUNNING] flake8 lint check (max-line-length=100, migrations excluded)..."
+    echo "[RUNNING] flake8 lint check..."
     exec python -m flake8 \
       --config /app/.flake8 \
       --count \
@@ -199,15 +190,15 @@ case "$SUITE" in
     echo "Usage: docker compose run --rm test [SUITE]"
     echo ""
     echo "Suites:"
-    echo "  unit       — All unit + integration tests (default, fast)"
-    echo "  api        — API integration tests"
-    echo "  security   — Security-focused tests (IDOR, webhook, OAuth)"
-    echo "  celery     — Celery task pipeline tests"
-    echo "  cloudinary — Cloudinary integration (requires real credentials)"
-    echo "  e2e        — End-to-end photographer flow"
-    echo "  coverage   — Full suite with HTML coverage report"
-    echo "  flake8     — Lint the codebase"
-    echo "  all        — Everything"
+    echo "  unit        — Pure unit tests (no DB, no network)"
+    echo "  integration — DB + Redis integration tests"
+    echo "  security    — Adversarial / IDOR / tenant isolation tests"
+    echo "  chaos       — Toxiproxy network fault injection"
+    echo "  celery      — Celery task pipeline tests"
+    echo "  mutation    — mutmut mutation testing baseline"
+    echo "  coverage    — Full suite with HTML coverage report"
+    echo "  flake8      — Lint the codebase"
+    echo "  all         — Everything"
     exit 1
     ;;
 esac

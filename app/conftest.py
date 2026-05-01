@@ -1,4 +1,3 @@
-import io
 import os
 
 import django
@@ -8,7 +7,7 @@ from django.core.cache import cache
 from rest_framework.test import APIClient
 
 
-os.environ.setdefault("DJANGO_SETTINGS_MODULE", "app.settings")
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "darasa_project.settings")
 django.setup()
 
 
@@ -20,7 +19,7 @@ def clear_shared_cache():
 
 
 @pytest.fixture
-def api_client():
+def api_client() -> APIClient:
     return APIClient()
 
 
@@ -30,16 +29,13 @@ def user_factory(db):
 
     def create_user(**overrides):
         defaults = {
-            "email": "photographer@example.com",
+            "email": "admin@darasa.test",
             "password": "StrongPassword123!",
-            "name": "PhotoBox User",
-            "accepted_terms": True,
+            "first_name": "Darasa",
+            "last_name": "Admin",
         }
         defaults.update(overrides)
         password = defaults.pop("password")
         return user_model.objects.create_user(password=password, **defaults)
 
     return create_user
-
-
-

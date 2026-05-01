@@ -1,24 +1,69 @@
+# =============================================================================
+# docker-compose.yml â€” Darasa-Core Development Stack
+# Back To Front Development
+#
+# SERVICES:
+#   db          â€” PostgreSQL 15 (schema-per-tenant via django-tenants)
+#   redis       â€” Redis 7 (Celery broker + cache)
+#   app         â€” Django dev server (hot-reload via volume mount)
+#   celery      â€” Celery worker (mirrors app, eager mode off)
+#   toxiproxy   â€” Network fault injection proxy (Chaos Engineering)
+#   test        â€” Isolated test runner (profile: test)
+#
+# CHAOS ENGINEERING:
+#   Toxiproxy exposes:
+#     :8474  â€” Toxiproxy HTTP API  (create/destroy toxics)
+#     :5433  â€” Proxy â†’ postgres:5432
+#     :6380  â€” Proxy â†’ redis:6379
+#   Tests that use the `toxiproxy` fixture connect through these ports.
+# =============================================================================
+
+# â”€â”€ Shared environment variables (anchored for DRY reuse) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 x-app-environment: &app-environment
-  DB_HOST: db
-  DB_NAME: darasa_db
-  DB_USER: devuser
-  DB_PASS: changeme
+  # Django
+  DJANGO_SETTINGS_MODULE: darasa_project.settings
+  SECRET_KEY: local-dev-insecure-key-change-me-in-env-file-abc123
   DEBUG: "1"
-  TESTING: "1"
-  SECRET_KEY: your-secret-key-here
-  JWT_SIGNING_KEY: test-signing-key-that-is-at-least-32-bytes-long!!
-  PYTHONPATH: /app
-  PYTHONDONTWRITEBYTECODE: "1"
+  ALLOWED_HOSTS: "localhost,127.0.0.1,app,0.0.0.0"
+
+  # PostgreSQL (via direct connection â€” services use toxiproxy for chaos tests)
+  DB_HOST: db
+  DB_PORT: "5432"
+  DB_NAME: darasa_db
+  DB_USER: darasa_dev
+  DB_PASS: darasa_dev_pass
+
+  # Redis
   REDIS_URL: redis://redis:6379/1
   CELERY_BROKER_URL: redis://redis:6379/0
   CELERY_RESULT_BACKEND: redis://redis:6379/0
-  FRONTEND_URL: http://localhost:3000
-  EMAIL_BACKEND: django.core.mail.backends.locmem.EmailBackend
-  LEMON_SQUEEZY_API_KEY: test-key
-  LEMON_SQUEEZY_STORE_ID: "1"
-  LEMON_SQUEEZY_WEBHOOK_SECRET_PRIMARY: test-ls-secret
-  LEMON_SQUEEZY_WEBHOOK_SECRET_SECONDARY: ""
 
+  # JWT
+  JWT_SIGNING_KEY: "local-jwt-signing-key-must-be-at-least-32-bytes!!"
+
+  # Chaos â€” Toxiproxy proxy addresses for DB and Redis
+  TOXIPROXY_HOST: toxiproxy
+  TOXIPROXY_API_PORT: "8474"
+  TOXIPROXY_DB_PORT: "5433"
+  TOXIPROXY_REDIS_PORT: "6380"
+
+  # Multi-tenancy
+  TENANT_DEFAULT_SCHEMA: public
+
+  # Fernet encryption key (generated via: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())")
+  FERNET_ENCRYPTION_KEY: "CHANGE-ME-RUN-fernet-generate_key-AND-PASTE-HERE=="
+
+  # Observability
+  DJANGO_LOG_LEVEL: INFO
+
+  # Email
+  EMAIL_BACKEND: django.core.mail.backends.locmem.EmailBackend
+
+  # Feature flags
+  TESTING: "0"
+  PYTHONPATH: /app
+
+# â”€â”€ Shared build config â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 x-app-build: &app-build
   context: .
   args:
@@ -27,33 +72,86 @@ x-app-build: &app-build
     APP_GID: ${APP_GID:-1000}
 
 services:
+
+  # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  # PostgreSQL 15
+  # Using schema-per-tenant. Each school gets its own Postgres schema.
+  # UPGRADE NOTE: postgres:13 â†’ postgres:15 for JSON path operators & perf.
+  # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   db:
-    image: postgres:13-alpine
+    image: postgres:15-alpine
     volumes:
       - dev-db-data:/var/lib/postgresql/data
     environment:
       POSTGRES_DB: darasa_db
-      POSTGRES_USER: devuser
-      POSTGRES_PASSWORD: changeme
+      POSTGRES_USER: darasa_dev
+      POSTGRES_PASSWORD: darasa_dev_pass
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U devuser -d darasa_db"]
-      interval: 10s
+      test: ["CMD-SHELL", "pg_isready -U darasa_dev -d darasa_db"]
+      interval: 5s
       timeout: 5s
-      retries: 10
+      retries: 15
       start_period: 10s
 
+  # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  # Redis 7 â€” Celery broker + Django cache
+  # maxmemory-policy allkeys-lru: evict least-recently-used keys under pressure
+  # appendonly no: dev doesn't need Redis AOF persistence
+  # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   redis:
     image: redis:7-alpine
-    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    command: >
+      redis-server
+      --save ""
+      --appendonly no
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
     volumes:
       - redis-data:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
+      interval: 5s
       timeout: 5s
       retries: 10
       start_period: 5s
 
+  # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  # Toxiproxy â€” Network Fault Injection (Chaos Engineering)
+  # Shopify's Toxiproxy intercepts TCP connections and can simulate:
+  #   - Latency      (add_latency toxic)
+  #   - Packet loss  (bandwidth toxic)
+  #   - Connection resets (reset_peer toxic)
+  #   - Timeouts     (timeout toxic)
+  #
+  # Tests that use the `toxiproxy` pytest fixture connect through:
+  #   DB:    toxiproxy:5433 â†’ db:5432
+  #   Redis: toxiproxy:6380 â†’ redis:6379
+  # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  toxiproxy:
+    image: ghcr.io/shopify/toxiproxy:2.9.0
+    ports:
+      - "8474:8474"   # Toxiproxy REST API (test fixtures call this to add toxics)
+      - "5433:5433"   # DB proxy
+      - "6380:6380"   # Redis proxy
+    # Pre-configure proxies at startup via the JSON config mount
+    volumes:
+      - ./toxiproxy.json:/config/toxiproxy.json:ro
+    command: ["--config", "/config/toxiproxy.json", "--host", "0.0.0.0"]
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:8474/proxies"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+
+  # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  # Django Application (dev server with hot-reload)
+  # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   app:
     build: *app-build
     working_dir: /app
@@ -61,11 +159,11 @@ services:
     ports:
       - "${APP_PORT:-8001}:8000"
     volumes:
-      - ./app:/app
+      - ./app:/app                        # Hot-reload: code changes are instant
       - dev-static-data:/vol/web
     command: >
       sh -c "python manage.py wait_for_db &&
-             python manage.py migrate &&
+             python manage.py migrate_schemas --shared &&
              python manage.py runserver 0.0.0.0:8000"
     environment:
       <<: *app-environment
@@ -74,14 +172,20 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      toxiproxy:
+        condition: service_healthy
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health-check/', timeout=5)"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health/', timeout=5)"]
       interval: 15s
-      timeout: 5s
+      timeout: 10s
       retries: 10
       start_period: 30s
     mem_limit: 1024m
 
+  # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  # Celery Worker â€” processes async tasks from the Redis queue
+  # CONCURRENCY=2 in dev is enough; production sets this via env var.
+  # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   celery:
     build: *app-build
     working_dir: /app
@@ -91,8 +195,7 @@ services:
       - dev-static-data:/vol/web
     command: >
       sh -c "python manage.py wait_for_db &&
-             python manage.py migrate &&
-             celery -A app worker --loglevel=info --concurrency=1"
+             celery -A darasa_project worker --loglevel=info --concurrency=2 -E"
     environment:
       <<: *app-environment
       TESTING: "0"
@@ -102,13 +205,41 @@ services:
       redis:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "celery -A app inspect ping -d celery@$$HOSTNAME --timeout=5 | grep -q OK"]
+      test: ["CMD-SHELL", "celery -A darasa_project inspect ping -d celery@$$HOSTNAME --timeout=5 | grep -q OK"]
       interval: 20s
       timeout: 10s
       retries: 5
       start_period: 40s
     mem_limit: 1024m
 
+  # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  # Celery Beat â€” periodic task scheduler
+  # ISOLATION: Beat is a separate process to prevent blocking the worker.
+  # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  celery-beat:
+    build: *app-build
+    working_dir: /app
+    user: "${APP_UID:-1000}:${APP_GID:-1000}"
+    volumes:
+      - ./app:/app
+      - dev-static-data:/vol/web
+    command: >
+      sh -c "python manage.py wait_for_db &&
+             celery -A darasa_project beat --loglevel=info --scheduler django_celery_beat.schedulers:DatabaseScheduler"
+    environment:
+      <<: *app-environment
+      TESTING: "0"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    mem_limit: 256m
+
+  # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  # Test Runner â€” isolated; only starts on `docker compose run test`
+  # The run-tests.sh entrypoint handles migrations then runs pytest.
+  # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   test:
     profiles: ["test"]
     build: *app-build
@@ -121,11 +252,20 @@ services:
     command: ["unit"]
     environment:
       <<: *app-environment
-      PYTEST_ADDOPTS: --tb=short -v
+      TESTING: "1"
+      DEBUG: "0"
+      PYTEST_ADDOPTS: "--tb=short -v"
+      # Test suite always connects through Toxiproxy for chaos tests
+      DB_HOST: toxiproxy
+      DB_PORT: "5433"
+      REDIS_URL: redis://toxiproxy:6380/1
+      CELERY_BROKER_URL: redis://toxiproxy:6380/0
     depends_on:
       db:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      toxiproxy:
         condition: service_healthy
     mem_limit: 1024m
 

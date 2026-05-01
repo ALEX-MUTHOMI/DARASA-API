@@ -1,0 +1,198 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# pyproject.toml — Darasa-Core ERP
+# Back To Front Development
+#
+# DETERMINISM: All versions are pinned with explicit ranges.
+# Run `poetry lock` once, then `poetry install --no-root` inside Docker.
+# NEVER run `pip install` loose packages without updating this file.
+# ─────────────────────────────────────────────────────────────────────────────
+
+[tool.poetry]
+name        = "darasa-core"
+version     = "0.1.0"
+description = "Enterprise-grade CBC Educational ERP — Kenyan Senior Secondary"
+authors     = ["Back To Front Development <dev@backtofrontdev.io>"]
+license     = "Proprietary"
+readme      = "README.md"
+packages    = []
+
+# ── Python Constraint ────────────────────────────────────────────────────────
+[tool.poetry.dependencies]
+python = ">=3.11,<3.13"
+
+# ── Django Core ──────────────────────────────────────────────────────────────
+Django                          = ">=5.0,<5.2"
+djangorestframework              = ">=3.15,<3.16"
+django-tenants                   = ">=3.6,<3.7"        # Schema-per-tenant multi-tenancy
+psycopg2-binary                  = ">=2.9,<2.10"       # Swap for psycopg2 (no binary) in prod image
+
+# ── Security & Identity ──────────────────────────────────────────────────────
+djangorestframework-simplejwt    = ">=5.3,<5.4"
+cryptography                     = ">=42.0,<43.0"       # Fernet field-level encryption
+argon2-cffi                      = ">=23.1,<24.0"       # Argon2 password hashing
+django-cors-headers              = ">=4.3,<4.4"
+
+# ── API Schema ───────────────────────────────────────────────────────────────
+drf-spectacular                  = ">=0.27,<0.28"
+
+# ── Async Task Bus ────────────────────────────────────────────────────────────
+celery                           = {version = ">=5.3,<5.4", extras = ["redis"]}
+redis                            = ">=5.0,<5.1"
+django-celery-beat               = ">=2.6,<2.7"         # Periodic task scheduling
+django-celery-results            = ">=2.5,<2.6"         # DB-backed task result store
+
+# ── Environment (typed, fail-fast env var loading) ────────────────────────────
+django-environ                   = ">=0.11,<0.12"       # Replaces python-dotenv — strict typing + Db URL parsing
+phonenumbers                     = ">=8.13,<9.0"        # E.164 phone validation (CustomUser + parent contacts)
+django-phonenumber-field         = {version = ">=7.3,<7.4", extras = ["phonenumbers"]}
+
+# ── Email ────────────────────────────────────────────────────────────────────
+# Sendgrid via SMTP — no vendor SDK to stay transport-agnostic
+
+# ── Observability (OpenTelemetry prep) ───────────────────────────────────────
+opentelemetry-api                = ">=1.24,<1.25"
+opentelemetry-sdk                = ">=1.24,<1.25"
+opentelemetry-instrumentation-django = ">=0.45b0,<0.46b0"
+opentelemetry-exporter-otlp-proto-grpc = ">=1.24,<1.25"
+sentry-sdk                       = {version = ">=2.0,<2.1", extras = ["django", "celery"]}
+
+# ── Production WSGI/ASGI ─────────────────────────────────────────────────────
+gunicorn                         = ">=22.0,<23.0"
+
+# ── Utilities ────────────────────────────────────────────────────────────────
+Pillow                           = ">=10.2,<11.0"        # Image processing (student photos)
+
+
+# ── Development & Testing (not installed in production image) ────────────────
+[tool.poetry.group.dev.dependencies]
+# Linting
+flake8                           = ">=7.1,<7.2"
+flake8-bugbear                   = ">=24.0,<25.0"         # Opinionated bug-prone patterns
+flake8-bandit                    = ">=4.1,<4.2"           # Security linting via bandit
+isort                            = ">=5.13,<5.14"
+black                            = ">=24.4,<25.0"          # Code formatter — 88-char lines
+
+# Testing
+pytest                           = ">=8.3,<8.4"
+pytest-django                    = ">=4.9,<4.10"
+pytest-mock                      = ">=3.14,<3.15"
+pytest-timeout                   = ">=2.3,<2.4"
+pytest-cov                       = ">=5.0,<5.1"
+pytest-xdist                     = ">=3.5,<3.6"           # Parallel test execution (-n auto)
+
+# Test data
+factory-boy                      = ">=3.3,<3.4"
+Faker                            = ">=25.0,<26.0"
+
+# Mutation testing — chaos engineering baseline
+mutmut                           = ">=2.4,<2.5"
+
+# Chaos / network fault injection
+toxiproxy-python                 = ">=0.0.2"              # Python client for Toxiproxy sidecar
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Tool Configurations
+# ─────────────────────────────────────────────────────────────────────────────
+
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "darasa_project.settings"
+python_files           = ["test_*.py", "*_test.py"]
+python_classes         = ["Test*"]
+python_functions       = ["test_*"]
+addopts                = [
+    "--strict-markers",
+    "--tb=short",
+    "-v",
+    "--cov=.",
+    "--cov-report=term-missing",
+    "--cov-report=html:htmlcov",
+    "--cov-fail-under=90",
+]
+markers = [
+    "unit: Pure unit tests — no DB, no network",
+    "integration: Tests that require DB or Redis",
+    "security: Adversarial security / isolation tests",
+    "chaos: Toxiproxy fault-injection tests",
+    "slow: Tests that take more than 5 seconds",
+    "celery: Celery task pipeline tests",
+]
+
+[tool.coverage.run]
+# Measure branch coverage, not just line coverage.
+# Branch coverage catches logic like `if x:` where both True/False paths must be tested.
+branch = true
+source = [
+    "core",
+    "tenant",
+    "bus",
+    "academics",
+    "grading",
+    "curriculum",
+    "disciplinary",
+    "portals",
+    "darasa_project",
+]
+omit = [
+    "*/migrations/*",
+    "*/tests/*",
+    "*/test_*.py",
+    "*_test.py",
+    "conftest.py",
+    "manage.py",
+    "*/settings*.py",
+    "*/wsgi.py",
+    "*/asgi.py",
+    "*/apps.py",
+    "*/admin.py",
+]
+
+[tool.coverage.report]
+# Lines that are excluded from coverage reporting.
+exclude_lines = [
+    # Standard pragma
+    "pragma: no cover",
+    # Abstract method bodies
+    "raise NotImplementedError",
+    # Type checking blocks (never executed at runtime)
+    "if TYPE_CHECKING:",
+    # Defensive assertions (Design by Contract — should never be hit in prod)
+    "assert False",
+    # Protocol stubs
+    "\\.\.\\.",
+]
+
+[tool.black]
+line-length    = 88
+target-version = ["py311"]
+exclude = '''
+/(
+    \.git
+  | \.venv
+  | venv
+  | migrations
+  | __pycache__
+  | dist
+  | build
+  | static
+  | static_root
+  | media_root
+  | htmlcov
+)/
+'''
+
+[tool.isort]
+profile                 = "black"
+known_django            = ["django"]
+known_first_party       = ["darasa_project", "tenant", "core", "bus", "academics", "grading", "curriculum", "disciplinary", "portals"]
+sections                = ["FUTURE", "STDLIB", "DJANGO", "THIRDPARTY", "FIRSTPARTY", "LOCALFOLDER"]
+
+[tool.mutmut]
+paths_to_mutate  = "darasa_project/"
+backup           = false
+runner           = "python -m pytest -x -q"
+tests_dir        = "tests/"
+
+[build-system]
+requires      = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
