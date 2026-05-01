@@ -159,7 +159,7 @@ exclude_lines = [
     # Defensive assertions (Design by Contract — should never be hit in prod)
     "assert False",
     # Protocol stubs
-    "\\.\.\\.",
+    '\\.\.\.',
 ]
 
 [tool.black]
