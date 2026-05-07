@@ -22,10 +22,10 @@ logs:
 	$(COMPOSE) logs -f
 
 migrate:
-	$(COMPOSE) run --rm $(DJANGO_SERVICE) bash -lc 'cd /workspace/app && python manage.py migrate'
+	$(COMPOSE) run --rm $(DJANGO_SERVICE) bash -c 'cd /workspace/app && python manage.py migrate'
 
 makemigrations:
-	$(COMPOSE) run --rm $(DJANGO_SERVICE) bash -lc 'cd /workspace/app && python manage.py makemigrations'
+	$(COMPOSE) run --rm $(DJANGO_SERVICE) bash -c 'cd /workspace/app && python manage.py makemigrations'
 
 test:
 	$(COMPOSE) run --rm $(DJANGO_SERVICE) bash /workspace/scripts/run-tests.sh unit
@@ -34,10 +34,10 @@ test-chaos:
 	$(COMPOSE) run --rm $(DJANGO_SERVICE) bash /workspace/scripts/run-tests.sh chaos
 
 lint:
-	$(COMPOSE) run --rm $(DJANGO_SERVICE) bash -lc 'cd /workspace && poetry run flake8 app'
+	$(COMPOSE) run --rm $(DJANGO_SERVICE) bash -c 'cd /workspace && flake8 app'
 
 security:
-	$(COMPOSE) run --rm $(DJANGO_SERVICE) bash -lc 'cd /workspace && poetry run bandit -r app -c pyproject.toml && poetry run pip-audit'
+	$(COMPOSE) run --rm $(DJANGO_SERVICE) bash -c 'cd /workspace && bandit -r app -c pyproject.toml && pip-audit'
 
 scaffold:
 	$(COMPOSE) run --rm --user root \
@@ -52,4 +52,4 @@ shell:
 	$(COMPOSE) run --rm $(DJANGO_SERVICE) bash
 
 django-check:
-	$(COMPOSE) run --rm $(DJANGO_SERVICE) bash -lc 'cd /workspace/app && python manage.py check'
+	$(COMPOSE) run --rm $(DJANGO_SERVICE) bash -c 'cd /workspace/app && python manage.py check'

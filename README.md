@@ -33,8 +33,16 @@ make test-chaos
 
 - Django project: `app/darasa_project`
 - Django entrypoint: `app/manage.py`
-- Container app workdir: `/app`
-- Container script mount: `/scripts`
+- Production image workdir: `/app`
+- Production image scripts: `/scripts`
+- Docker Compose development workspace: `/workspace`
+- Docker Compose development scripts: `/workspace/scripts`
+
+The production image copies `app/` to `/app` and `scripts/` to `/scripts`.
+The development Compose stack bind-mounts the repository root at `/workspace`
+so Poetry can see `pyproject.toml`, `.flake8`, and `poetry.lock` without nested
+file mounts inside `/app`. Django commands should run from `/workspace/app`
+when using Compose.
 
 ## Boundary
 

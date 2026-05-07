@@ -114,3 +114,7 @@ Desktop.ini
 ngrok
 ngrok.exe
 .tmpdeps/
+
+# Avoid duplicate nested tool configs; repo-root config is canonical.
+app/pyproject.toml
+app/pytest.ini

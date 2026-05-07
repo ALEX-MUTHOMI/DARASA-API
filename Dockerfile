@@ -8,7 +8,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
     POETRY_NO_INTERACTION=1 \
     POETRY_VIRTUALENVS_CREATE=false \
-    POETRY_VERSION=1.8.3 \
+    POETRY_VERSION=2.3.4 \
     VIRTUAL_ENV=/opt/venv \
     PATH="/opt/venv/bin:/scripts:${PATH}"
 
@@ -24,13 +24,16 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 RUN python -m venv /opt/venv \
-    && pip install --upgrade pip setuptools wheel \
-    && pip install "poetry==${POETRY_VERSION}"
+    && python -m venv /opt/poetry \
+    && /opt/venv/bin/pip install --upgrade pip setuptools wheel \
+    && /opt/poetry/bin/pip install "poetry==${POETRY_VERSION}"
 
 WORKDIR /build
 COPY pyproject.toml poetry.lock* ./
 
-RUN poetry install --no-root ${POETRY_INSTALL_ARGS}
+RUN VIRTUAL_ENV=/opt/venv \
+    PATH="/opt/venv/bin:/opt/poetry/bin:${PATH}" \
+    poetry install --no-root ${POETRY_INSTALL_ARGS}
 
 FROM base AS runtime
 

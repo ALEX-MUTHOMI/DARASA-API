@@ -8,6 +8,7 @@ from typing import Any
 from urllib.parse import quote_plus
 
 import environ
+from cryptography.fernet import Fernet
 from django.core.exceptions import ImproperlyConfigured
 
 
@@ -50,6 +51,9 @@ def _detect_test_mode() -> bool:
     return any(
         arg in {"test", "pytest"}
         or arg.endswith(("/pytest", "\\pytest", "/pytest.exe", "\\pytest.exe"))
+        or arg.endswith(("/pytest/__main__.py", "\\pytest\\__main__.py"))
+        or "/pytest/" in arg
+        or "\\pytest\\" in arg
         for arg in argv
     )
 
@@ -260,8 +264,8 @@ if REDIS_URL and not TESTING:
             "BACKEND": "django.core.cache.backends.redis.RedisCache",
             "LOCATION": REDIS_URL,
             "OPTIONS": {
-                "SOCKET_CONNECT_TIMEOUT": 5,
-                "SOCKET_TIMEOUT": 5,
+                "socket_connect_timeout": 5,
+                "socket_timeout": 5,
             },
         }
     }
@@ -323,7 +327,26 @@ CELERY_TASK_SOFT_TIME_LIMIT = 300
 CELERY_TASK_TIME_LIMIT = 600
 CELERY_BEAT_SCHEDULER = "django_celery_beat.schedulers:DatabaseScheduler"
 
-FERNET_ENCRYPTION_KEY = env("FERNET_ENCRYPTION_KEY", default="")
+
+def _get_fernet_encryption_key() -> str:
+    key = env("FERNET_ENCRYPTION_KEY", default="").strip()
+    if not key:
+        if TESTING:
+            return ""
+        raise ImproperlyConfigured("FERNET_ENCRYPTION_KEY is required.")
+
+    try:
+        Fernet(key)
+    except (TypeError, ValueError) as exc:
+        raise ImproperlyConfigured(
+            "FERNET_ENCRYPTION_KEY must be a valid 32-byte url-safe "
+            "base64-encoded Fernet key."
+        ) from exc
+
+    return key
+
+
+FERNET_ENCRYPTION_KEY = _get_fernet_encryption_key()
 
 DEFAULT_FROM_EMAIL = env(
     "DEFAULT_FROM_EMAIL",
