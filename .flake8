@@ -1,77 +1,23 @@
 [flake8]
-# =============================================================================
-# Darasa-Core — flake8 Configuration
-# Back To Front Development
-#
-# Line length = 88 to match Black's default formatter.
-# Any deviation from Black output that flake8 would catch is a bug in
-# our pre-commit flow (Black should have already fixed it).
-# =============================================================================
-
 max-line-length = 88
-
-# ── Exclusions ────────────────────────────────────────────────────────────────
-# Never lint auto-generated files or environment artifacts.
+extend-ignore =
+    E203,
+    W503
 exclude =
-    # Django
-    */migrations/*,
-    # Python environments
+    .git,
+    __pycache__,
+    .pytest_cache,
+    .mypy_cache,
+    .mutmut-cache,
     .venv,
     venv,
     env,
-    .env,
-    __pycache__,
-    # Build artefacts
-    .git,
-    dist,
     build,
-    *.egg-info,
-    # Static / media
-    static,
-    static_root,
-    media_root,
-    # Test artefacts
+    dist,
     htmlcov,
-    .pytest_cache,
-    .mutmut-cache,
-    # Django scaffolding (Black formats these but we skip flake8 noise)
-    manage.py,
-    # Documentation
-    docs,
-    docs-site,
-
-# ── Per-file Ignores ──────────────────────────────────────────────────────────
+    */migrations/*
 per-file-ignores =
-    # Tests: allow assert statements (S101) and magic value comparisons (PLR2004)
-    # assert is the standard pytest assertion mechanism — this is correct behaviour
-    */tests/test_*.py: S101, PLR2004, S105, S106
-    # Settings: allow wildcard imports (F401, F403) — Django's standard pattern
-    */settings*.py: F401, F403, E501
-    # __init__.py: allow unused imports used for public API re-exports
-    */__init__.py: F401
-    # conftest.py: fixtures frequently appear "unused" to static analysis
-    conftest.py: F401, F811
-
-# ── Active Error Codes ────────────────────────────────────────────────────────
-# We enable flake8-bugbear (B*) and flake8-bandit (S*) extensions.
-# ALL codes are enabled by default; only the ones below are explicitly ignored.
-extend-ignore =
-    # E203: whitespace before ':' — Black formats slices this way (x[1 : 2])
-    E203,
-    # W503: line break before binary operator — Black prefers this style
-    W503,
-    # W504: line break after binary operator — conflicts with W503, pick one
-    # W504 is the flake8 default; we disable it because Black uses W503 style
-    W504,
-    # B008: do not perform function calls in default arguments
-    # Django REST Framework uses this pattern extensively (e.g. serializer fields)
-    B008,
-    # S603/S607: subprocess without shell=True — acceptable in management commands
-    S603,
-    S607,
-
-# ── Statistics ────────────────────────────────────────────────────────────────
-# Show counts per error code at the end of the run
-count = True
-statistics = True
-show-source = True
+    */__init__.py:F401
+count = true
+show-source = true
+statistics = true

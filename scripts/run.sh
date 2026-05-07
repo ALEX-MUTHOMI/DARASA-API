@@ -1,35 +1,37 @@
-#!/bin/sh
-# ─────────────────────────────────────────────────────────────────────────────
-# run.sh — Darasa-Core production entrypoint
-# Back To Front Development
-#
-# Executed as CMD inside the Docker container for the `app` service.
-# For the `celery` service, docker-compose.yml overrides CMD directly.
-# ─────────────────────────────────────────────────────────────────────────────
-set -e
+#!/usr/bin/env bash
+set -eo pipefail
 
-echo "[INFO] Starting Darasa-Core..."
-echo "[INFO] Python: $(python --version)"
-echo "[INFO] Django: $(python -c 'import django; print(django.__version__)')"
+APP_MODULE="${DJANGO_WSGI_MODULE:-darasa_project.wsgi:application}"
+HOST="${GUNICORN_BIND_HOST:-0.0.0.0}"
+PORT="${GUNICORN_BIND_PORT:-8000}"
+WORKERS="${GUNICORN_WORKERS:-3}"
+TIMEOUT="${GUNICORN_TIMEOUT:-60}"
+LOG_LEVEL="${GUNICORN_LOG_LEVEL:-info}"
 
-# Wait for DB to be reachable before running gunicorn
+echo "Starting Darasa-Core Django runtime"
+echo "Python: $(python --version)"
+
+if [ ! -f "manage.py" ] && [ -f "app/manage.py" ]; then
+  cd app
+fi
+
+if [ ! -f "manage.py" ]; then
+  echo "manage.py not found in $(pwd)"
+  exit 1
+fi
+
+echo "Waiting for database readiness"
 python manage.py wait_for_db
 
-# Migrate shared schema (public schema — tenant registry, billing, etc.)
-python manage.py migrate_schemas --shared --no-input
+echo "Running Django system checks"
+python manage.py check
 
-# Collect static files for Nginx/CDN serving
-python manage.py collectstatic --no-input
-
-echo "[INFO] Launching Gunicorn..."
-exec gunicorn \
-    darasa_project.wsgi:application \
-    --bind 0.0.0.0:8000 \
-    --workers "${GUNICORN_WORKERS:-4}" \
-    --worker-class sync \
-    --timeout "${GUNICORN_TIMEOUT:-30}" \
-    --max-requests 1000 \
-    --max-requests-jitter 100 \
-    --log-level info \
-    --access-logfile - \
-    --error-logfile -
+echo "Launching Gunicorn on ${HOST}:${PORT}"
+exec gunicorn "${APP_MODULE}" \
+  --bind "${HOST}:${PORT}" \
+  --workers "${WORKERS}" \
+  --worker-class sync \
+  --timeout "${TIMEOUT}" \
+  --access-logfile - \
+  --error-logfile - \
+  --log-level "${LOG_LEVEL}"

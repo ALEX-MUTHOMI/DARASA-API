@@ -1,268 +1,115 @@
-# =============================================================================
-# .gitignore — Darasa-Core ERP
-# Back To Front Development
-#
-# SECURITY RULE: When in doubt, exclude it.
-# If a secret, credential, or local state file is not listed here,
-# add it immediately. Never rely on developer discipline alone.
-# =============================================================================
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# 🔐 SECRETS & ENVIRONMENT — NEVER commit these
-# ─────────────────────────────────────────────────────────────────────────────
+# Environment and secrets
 .env
 .env.*
 !.env.example
-!.env.sample
 *.pem
 *.key
 *.p12
 *.pfx
 *.crt
 *.cer
+*.jks
+*.keystore
 secrets/
 local_settings.py
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# 🐍 PYTHON BYTECODE & CACHE
-# ─────────────────────────────────────────────────────────────────────────────
+# Python caches
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
 .Python
-*.pyo
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# 📦 PACKAGING & DISTRIBUTION
-# ─────────────────────────────────────────────────────────────────────────────
+# Packaging and dependency artifacts
 build/
 dist/
-develop-eggs/
-downloads/
-eggs/
+*.egg-info/
 .eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
+eggs/
 wheels/
 pip-wheel-metadata/
-share/python-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
-MANIFEST
+poetry.lock.tmp
 
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+__pypackages__/
 
-# ─────────────────────────────────────────────────────────────────────────────
-# 🗄️ DATABASES — We use PostgreSQL. SQLite is NEVER used in production.
-# ─────────────────────────────────────────────────────────────────────────────
+# Test and coverage artifacts
+.pytest_cache/
+.hypothesis/
+.coverage
+.coverage.*
+coverage.xml
+coverage.json
+htmlcov/
+.tox/
+.nox/
+*.cover
+*.py,cover
+
+# Mutation testing artifacts
+.mutmut-cache/
+mutmut-cache/
+mutmut-results.xml
+
+# SQLite and local databases
+*.sqlite
 *.sqlite3
 *.sqlite3-journal
 *.db
 db.sqlite3
 db.sqlite3-journal
-test_db.sqlite3
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# 🧪 PYTEST & COVERAGE
-# ─────────────────────────────────────────────────────────────────────────────
-.pytest_cache/
-.cache/
-.coverage
-.coverage.*
-coverage.xml
-coverage.json
-*.cover
-*.py,cover
-htmlcov/
-.hypothesis/
-.tox/
-.nox/
-nosetests.xml
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# ☢️ MUTATION TESTING (mutmut)
-# ─────────────────────────────────────────────────────────────────────────────
-.mutmut-cache
-mutmut-results.xml
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# ⚙️ CELERY
-# ─────────────────────────────────────────────────────────────────────────────
+# Logs and process files
+*.log
+logs/
+*.pid
 celerybeat-schedule
-celerybeat-schedule.db
-celerybeat.pid
+celerybeat-schedule.*
 
+# Django local runtime artifacts
+static_root/
+staticfiles/
+media/
+media_root/
+app/media/
+app/media_root/
+app/static_root/
 
-# ─────────────────────────────────────────────────────────────────────────────
-# 🔴 REDIS
-# ─────────────────────────────────────────────────────────────────────────────
+# Local DB dumps and backups
+*.dump
+*.sql
+*.sql.gz
+*.bak
+*.backup
+
+# Redis and Toxiproxy local state
 dump.rdb
 *.rdb
+toxiproxy-server*
+.toxiproxy/
+toxiproxy-state/
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# 🌐 DJANGO RUNTIME ARTEFACTS
-# ─────────────────────────────────────────────────────────────────────────────
-static_root/
-**/static_root/
-media_root/
-**/media_root/
-staticfiles/
-/site
-*.log
-django_cache/
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# 🐳 DOCKER LOCAL VOLUMES
-# ─────────────────────────────────────────────────────────────────────────────
-# Docker named volumes are managed by Docker daemon, not git
-postgres-data/
-redis-data/
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# 💻 IDE & EDITOR CONFIGS
-# Personal IDE settings must NEVER be shared — they are machine-specific.
-# ─────────────────────────────────────────────────────────────────────────────
-# VSCode
+# OS and editor files
+.DS_Store
+Thumbs.db
+Desktop.ini
+.idea/
 .vscode/
 *.code-workspace
-
-# JetBrains (PyCharm, IntelliJ, WebStorm, etc.)
-.idea/
-*.iml
-*.iws
-*.ipr
-.idea_modules/
-
-# Vim / Neovim
 *.swp
 *.swo
 *~
-.netrwhist
 
-# Emacs
-*#
-.#*
-\#*#
-
-# Sublime Text
-*.sublime-project
-*.sublime-workspace
-
-# macOS
-.DS_Store
-.AppleDouble
-.LSOverride
-Icon
-._*
-.Spotlight-V100
-.Trashes
-.fseventsd/
-.DocumentRevisions-V100/
-
-# Windows
-Thumbs.db
-ehthumbs.db
-Desktop.ini
-$RECYCLE.BIN/
-
-# Linux
-.directory
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# 🐍 VIRTUAL ENVIRONMENTS
-# ─────────────────────────────────────────────────────────────────────────────
-.venv/
-venv/
-env/
-ENV/
-env.bak/
-venv.bak/
-.virtualenv/
-__pypackages__/
-.python-version
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# 📝 TYPE CHECKERS
-# ─────────────────────────────────────────────────────────────────────────────
+# Misc local tooling
 .mypy_cache/
-.dmypy.json
-dmypy.json
 .pyre/
 .pytype/
-pyrightconfig.json
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# 📚 DOCUMENTATION BUILDS
-# ─────────────────────────────────────────────────────────────────────────────
-docs/_build/
-docs/site/
-site/
-_site/
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# 🧰 MISC TOOLS
-# ─────────────────────────────────────────────────────────────────────────────
-# Jupyter
+.ruff_cache/
+.cache/
 .ipynb_checkpoints/
-*.ipynb
-
-# pyenv
-.python-version
-
-# pipenv
-Pipfile.lock
-
-# Rope
-.ropeproject
-
-# mkdocs
-/site
-
-# profiling
-*.prof
-
-# Ngrok (local tunnel binary — should never be in source)
 ngrok
 ngrok.exe
-*.ngrok.yml
-
-# Toxiproxy local state (managed by Docker, not git)
-toxiproxy-server*
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# 🚫 EXPLICITLY BLOCKED DEVELOPER ANTI-PATTERNS
-# These files represent developer shortcuts that MUST NOT reach the repo.
-# ─────────────────────────────────────────────────────────────────────────────
-# Local seed scripts that may contain real PII data
-app/core/management/commands/seed_db.py
-app/**/management/commands/seed_*.py
-
-# Test media files (must never contain real student data)
-app/test_media/
-**/test_media/
-
-# Any file named "scratch" or "temp"
-scratch.*
-temp.*
-tmp.*
-
-# GitHub workflow overrides that should not be shared
-.github/workflows/docs-site.yml

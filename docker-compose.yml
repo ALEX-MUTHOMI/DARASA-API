@@ -108,6 +108,8 @@ services:
     volumes:
       - ./app:/app
       - ./scripts:/scripts:ro
+      - ./pyproject.toml:/app/pyproject.toml:ro
+      - ./.flake8:/app/.flake8:ro
       - static-data:/vol/web/static
       - media-data:/vol/web/media
     depends_on:
@@ -126,6 +128,8 @@ services:
     volumes:
       - ./app:/app
       - ./scripts:/scripts:ro
+      - ./pyproject.toml:/app/pyproject.toml:ro
+      - ./.flake8:/app/.flake8:ro
       - static-data:/vol/web/static
       - media-data:/vol/web/media
     depends_on:
@@ -144,6 +148,8 @@ services:
     volumes:
       - ./app:/app
       - ./scripts:/scripts:ro
+      - ./pyproject.toml:/app/pyproject.toml:ro
+      - ./.flake8:/app/.flake8:ro
       - static-data:/vol/web/static
       - media-data:/vol/web/media
     depends_on:
