@@ -1,0 +1,306 @@
+name: Darasa-Core CI
+
+on:
+  push:
+    branches: ["main", "develop", "development", "staging"]
+  pull_request:
+    branches: ["main", "develop", "development", "staging"]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  PYTHON_VERSION: "3.11"
+  POETRY_VERSION: "2.3.4"
+
+jobs:
+  validate:
+    name: Validate
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Print Python version
+        run: python --version
+
+      - name: Install Poetry
+        run: python -m pip install "poetry==${POETRY_VERSION}"
+
+      - name: Validate TOML files
+        run: |
+          python - <<'PY'
+          import pathlib
+          import tomllib
+
+          for path in [pathlib.Path("pyproject.toml")]:
+              with path.open("rb") as fh:
+                  tomllib.load(fh)
+              print(f"{path} is valid TOML")
+          PY
+
+      - name: Validate Poetry metadata
+        run: poetry check
+
+      - name: Validate Docker Compose config
+        run: docker compose config -q
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    needs: validate
+    strategy:
+      fail-fast: false
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install Poetry
+        run: python -m pip install "poetry==${POETRY_VERSION}"
+
+      - name: Install lint dependencies
+        run: |
+          poetry config virtualenvs.in-project true
+          poetry install --no-interaction --no-root --with dev
+
+      - name: flake8
+        run: poetry run flake8 app
+
+  security:
+    name: Security
+    runs-on: ubuntu-latest
+    needs: validate
+    strategy:
+      fail-fast: false
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install Poetry
+        run: python -m pip install "poetry==${POETRY_VERSION}"
+
+      - name: Install security dependencies
+        run: |
+          poetry config virtualenvs.in-project true
+          poetry install --no-interaction --no-root --with security
+
+      - name: Bandit static security scan
+        run: poetry run bandit -r app -c pyproject.toml
+
+      - name: pip-audit dependency scan
+        run: poetry run pip-audit
+
+  django-smoke:
+    name: Django-Smoke
+    runs-on: ubuntu-latest
+    needs: validate
+    strategy:
+      fail-fast: false
+    env:
+      DJANGO_SETTINGS_MODULE: darasa_project.settings
+      PYTHONPATH: app
+      SECRET_KEY: ci-secret-key-not-for-runtime-use
+      DARASA_DEBUG: "0"
+      DEBUG: "0"
+      ALLOWED_HOSTS: localhost,127.0.0.1
+      CSRF_TRUSTED_ORIGINS: http://localhost,http://127.0.0.1
+      POSTGRES_DB: darasa_core
+      POSTGRES_USER: darasa
+      POSTGRES_PASSWORD: darasa
+      DATABASE_URL: postgresql://darasa:darasa@127.0.0.1:5432/darasa_core
+      REDIS_URL: redis://127.0.0.1:6379/0
+      CACHE_URL: redis://127.0.0.1:6379/1
+      CELERY_BROKER_URL: redis://127.0.0.1:6379/2
+      CELERY_RESULT_BACKEND: redis://127.0.0.1:6379/3
+      JWT_SIGNING_KEY: ci-jwt-signing-key-at-least-32-bytes
+      # Local/dev/CI sample only. Rotate with a generated Fernet key in production.
+      FERNET_ENCRYPTION_KEY: ZGFyYXNhLWNvcmUtbG9jYWwtZGV2LWtleS0wMDAxMjM=
+      TENANT_PUBLIC_SCHEMA_NAME: public
+      PG_EXTRA_SEARCH_PATHS: ""
+      DJANGO_LOG_LEVEL: WARNING
+      OTEL_SERVICE_NAME: darasa-core-ci
+      OTEL_TRACES_EXPORTER: none
+      OTEL_METRICS_EXPORTER: none
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_DB: darasa_core
+          POSTGRES_USER: darasa
+          POSTGRES_PASSWORD: darasa
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U darasa -d darasa_core"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install Poetry
+        run: python -m pip install "poetry==${POETRY_VERSION}"
+
+      - name: Install Django dependencies
+        run: |
+          poetry config virtualenvs.in-project true
+          poetry install --no-interaction --no-root --with dev
+
+      - name: Verify settings import
+        run: poetry run python -c "import os; os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'darasa_project.settings'); import django; django.setup(); print('Django settings loaded')"
+
+      - name: Django system check
+        run: poetry run python app/manage.py check
+
+  unit-tests:
+    name: Unit-Tests
+    runs-on: ubuntu-latest
+    needs: django-smoke
+    strategy:
+      fail-fast: false
+    env:
+      DJANGO_SETTINGS_MODULE: darasa_project.settings
+      PYTHONPATH: app
+      SECRET_KEY: ci-secret-key-not-for-runtime-use
+      DARASA_DEBUG: "0"
+      DEBUG: "0"
+      ALLOWED_HOSTS: localhost,127.0.0.1
+      CSRF_TRUSTED_ORIGINS: http://localhost,http://127.0.0.1
+      POSTGRES_DB: darasa_core
+      POSTGRES_USER: darasa
+      POSTGRES_PASSWORD: darasa
+      DATABASE_URL: postgresql://darasa:darasa@127.0.0.1:5432/darasa_core
+      REDIS_URL: redis://127.0.0.1:6379/0
+      CACHE_URL: redis://127.0.0.1:6379/1
+      CELERY_BROKER_URL: redis://127.0.0.1:6379/2
+      CELERY_RESULT_BACKEND: redis://127.0.0.1:6379/3
+      JWT_SIGNING_KEY: ci-jwt-signing-key-at-least-32-bytes
+      # Local/dev/CI sample only. Rotate with a generated Fernet key in production.
+      FERNET_ENCRYPTION_KEY: ZGFyYXNhLWNvcmUtbG9jYWwtZGV2LWtleS0wMDAxMjM=
+      TENANT_PUBLIC_SCHEMA_NAME: public
+      PG_EXTRA_SEARCH_PATHS: ""
+      DJANGO_LOG_LEVEL: WARNING
+      OTEL_SERVICE_NAME: darasa-core-ci
+      OTEL_TRACES_EXPORTER: none
+      OTEL_METRICS_EXPORTER: none
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_DB: darasa_core
+          POSTGRES_USER: darasa
+          POSTGRES_PASSWORD: darasa
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U darasa -d darasa_core"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install Poetry
+        run: python -m pip install "poetry==${POETRY_VERSION}"
+
+      - name: Install test dependencies
+        run: |
+          poetry config virtualenvs.in-project true
+          poetry install --no-interaction --no-root --with dev
+
+      - name: Pytest Phase 1-safe tests
+        run: poetry run pytest -m "not chaos and not integration and not phase2 and not phase3 and not phase4 and not phase5 and not phase6 and not future"
+
+  docker-build:
+    name: Docker-Build
+    runs-on: ubuntu-latest
+    needs: validate
+    strategy:
+      fail-fast: false
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build production image
+        run: docker build --build-arg POETRY_INSTALL_ARGS="--only main" -t darasa-core:ci .
+
+  ci-gate:
+    name: CI Gate
+    runs-on: ubuntu-latest
+    if: always()
+    needs:
+      - validate
+      - lint
+      - security
+      - django-smoke
+      - unit-tests
+      - docker-build
+    steps:
+      - name: Summarize gate results
+        run: |
+          echo "validate=${{ needs.validate.result }}"
+          echo "lint=${{ needs.lint.result }}"
+          echo "security=${{ needs.security.result }}"
+          echo "django-smoke=${{ needs.django-smoke.result }}"
+          echo "unit-tests=${{ needs.unit-tests.result }}"
+          echo "docker-build=${{ needs.docker-build.result }}"
+
+          if [[ "${{ needs.validate.result }}" != "success" || \
+                "${{ needs.lint.result }}" != "success" || \
+                "${{ needs.security.result }}" != "success" || \
+                "${{ needs.django-smoke.result }}" != "success" || \
+                "${{ needs.unit-tests.result }}" != "success" || \
+                "${{ needs.docker-build.result }}" != "success" ]]; then
+            echo "One or more diagnostic gates failed."
+            exit 1
+          fi
+
+          echo "All diagnostic gates passed."

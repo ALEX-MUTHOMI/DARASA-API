@@ -1,202 +1,74 @@
 """
-Core Database Models for the PhotoBox SaaS API.
+core/models.py
+==============
+Global Identity & Shared Base Utilities
+Back To Front Development
+
+SECURITY:
+    - Primary keys are strictly UUIDv4 to prevent IDOR traversal.
+    - EncryptedCharField uses Fernet symmetric encryption to armor PII.
 """
-import os
+
 import uuid
+
+from cryptography.fernet import Fernet
 from django.conf import settings
+from django.contrib.auth.models import AbstractUser, UserManager
 from django.db import models
-from django.core.exceptions import ValidationError
-from django.core.validators import MaxValueValidator, MinValueValidator
-from django.contrib.auth.models import AbstractBaseUser, BaseUserManager, PermissionsMixin
-from django.contrib.auth.hashers import make_password, check_password
-from PIL import Image as PILImage
-from PIL import UnidentifiedImageError
-
-# --- SECURE FILE PATH GENERATORS ---
-def workspace_logo_file_path(instance, filename):
-    ext = os.path.splitext(filename)[1]
-    return os.path.join('uploads', 'workspace', 'logos', f'{uuid.uuid4()}{ext}')
-
-def workspace_watermark_file_path(instance, filename):
-    ext = os.path.splitext(filename)[1]
-    return os.path.join('uploads', 'workspace', 'watermarks', f'{uuid.uuid4()}{ext}')
-
-def workspace_image_file_path(instance, filename):
-    ext = os.path.splitext(filename)[1]
-    return os.path.join('uploads', 'workspace', str(instance.gallery.workspace.id), f'{uuid.uuid4()}{ext}')
+from django.utils.translation import gettext_lazy as _
+from tenant.models import TimeStampedModel
 
 
-def validate_png_watermark(uploaded_file):
-    if not uploaded_file:
-        return
+class EncryptedCharField(models.CharField):
+    """
+    Transparently encrypts data at the database layer.
+    Requires FERNET_ENCRYPTION_KEY in settings.
+    """
 
-    filename = (getattr(uploaded_file, 'name', '') or '').lower()
-    if not filename.endswith('.png'):
-        raise ValidationError("Watermark logo must use the .png extension.")
+    def __init__(self, *args, **kwargs):
+        kwargs.setdefault("max_length", 255)
+        super().__init__(*args, **kwargs)
 
-    position = None
-    if hasattr(uploaded_file, 'tell'):
-        position = uploaded_file.tell()
+    def get_prep_value(self, value):
+        value = super().get_prep_value(value)
+        if value is None or value == "":
+            return value
+        fernet = Fernet(settings.FERNET_ENCRYPTION_KEY)
+        return fernet.encrypt(str(value).encode("utf-8")).decode("utf-8")
 
-    try:
-        if hasattr(uploaded_file, 'seek'):
-            uploaded_file.seek(0)
-        with PILImage.open(uploaded_file) as image:
-            if image.format != 'PNG':
-                raise ValidationError("Watermark logo must be a valid PNG image.")
-            image.verify()
-    except (UnidentifiedImageError, OSError) as exc:
-        raise ValidationError("Watermark logo must be a valid PNG image.") from exc
-    finally:
-        if hasattr(uploaded_file, 'seek'):
-            uploaded_file.seek(position or 0)
-
-
-# ==========================================
-# 1. ABSTRACT BASE MODELS (Audit & Data Retention)
-# ==========================================
-class SoftDeleteModel(models.Model):
-    """Base model providing UUIDs, audit timestamps, and soft-delete capabilities."""
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-    is_deleted = models.BooleanField(default=False)
-
-    class Meta:
-        abstract = True
+    def from_db_value(self, value, expression, connection):
+        if value is None or value == "":
+            return value
+        fernet = Fernet(settings.FERNET_ENCRYPTION_KEY)
+        try:
+            return fernet.decrypt(value.encode("utf-8")).decode("utf-8")
+        except Exception:
+            return value
 
 
-# ==========================================
-# 2. AUTHENTICATION & BILLING
-# ==========================================
-class UserManager(BaseUserManager):
-    def create_user(self, email, password=None, **extra_fields):
-        if not email:
-            raise ValueError('User must have an email address.')
-        user = self.model(email=self.normalize_email(email), **extra_fields)
-        user.set_password(password)
-        user.save(using=self._db)
-        return user
-
-    def create_superuser(self, email, password):
-        user = self.create_user(email, password)
-        user.is_staff = True
-        user.is_superuser = True
-        user.save(using=self._db)
-        return user
+class CustomUserManager(UserManager):
+    pass
 
 
-class User(AbstractBaseUser, PermissionsMixin):
-    """Account owners (Photographers). Clients do NOT use this."""
-    class SubscriptionTier(models.TextChoices):
-        FREE = 'FREE', 'Free Tier'
-        PRO = 'PRO', 'Professional'
+class CustomUser(AbstractUser, TimeStampedModel):
+    """
+    Global Identity Model.
+    Lives in the PUBLIC schema. Tenant access is resolved via RBAC matrices.
+    """
 
-    email = models.EmailField(max_length=255, unique=True)
-    name = models.CharField(max_length=255)
-    is_active = models.BooleanField(default=True)
-    is_staff = models.BooleanField(default=False)
-
-    accepted_terms = models.BooleanField(default=False)
-    tos_accepted_at = models.DateTimeField(blank=True, null=True)
-    tos_version = models.CharField(max_length=64, blank=True)
-
-    # Billing State
-    stripe_customer_id = models.CharField(max_length=255, blank=True)
-    subscription_tier = models.CharField(max_length=20, choices=SubscriptionTier.choices, default=SubscriptionTier.FREE)
-
-    # Storage limit tracked in GB for easy human/billing logic
-    storage_limit_gb = models.IntegerField(default=1)
-
-    objects = UserManager()
-    USERNAME_FIELD = 'email'
-
-    def save(self, *args, **kwargs):
-        """
-        EDA FIX: Auto-Sync Billing to the Storage Ledger.
-        If Stripe updates storage_limit_gb, automatically sync it to Workspace bytes.
-        """
-        super().save(*args, **kwargs)
-        # Ensure the user has a workspace, then sync the bytes
-        if hasattr(self, 'workspace'):
-            new_byte_limit = self.storage_limit_gb * 1024 * 1024 * 1024
-            if self.workspace.storage_limit_bytes != new_byte_limit:
-                self.workspace.storage_limit_bytes = new_byte_limit
-                self.workspace.save(update_fields=['storage_limit_bytes'])
-
-
-# ==========================================
-# 3. TENANT ISOLATION & FRONTEND BRANDING
-# ==========================================
-class Workspace(SoftDeleteModel):
-    """The tenant boundary. Holds UX configuration and EDA Quotas."""
-
-    # THE EDA FIX: Changed from ForeignKey to OneToOneField.
-    # Guarantees 100% safety for Workspace.objects.get(user=user)
-    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='workspace')
-
-    business_name = models.CharField(max_length=255)
-    custom_domain = models.CharField(max_length=255, blank=True, null=True, unique=True)
-
-    # Frontend Branding
-    logo = models.ImageField(upload_to=workspace_logo_file_path, null=True, blank=True)
-    brand_color = models.CharField(max_length=7, default='#000000')
-    watermark_logo = models.ImageField(
-        upload_to=workspace_watermark_file_path,
-        null=True,
-        blank=True,
-        validators=[validate_png_watermark],
-    )
-    watermark_opacity = models.PositiveSmallIntegerField(
-        default=35,
-        validators=[MinValueValidator(0), MaxValueValidator(100)],
+    id = models.UUIDField(
+        primary_key=True,
+        default=uuid.uuid4,
+        editable=False,
+        help_text=_("UUIDv4 to prevent Insecure Direct Object Reference (IDOR)"),
     )
 
-    # --- EDA UPGRADE: The Atomic Quota Ledger ---
-    # MinValueValidator enforces database-level integrity against negative storage hacks
-    storage_limit_bytes = models.BigIntegerField(default=1 * 1024 * 1024 * 1024, validators=[MinValueValidator(0)])
-    storage_used_bytes = models.BigIntegerField(default=0, validators=[MinValueValidator(0)])
-
-    def __str__(self):
-        return self.business_name
-
-
-# ==========================================
-# 4. APPLICATION RESOURCES (LEGACY SUPPORT)
-# ==========================================
-class Gallery(SoftDeleteModel):
-    """A collection of images with strict Client UX controls."""
-    workspace = models.ForeignKey(Workspace, on_delete=models.CASCADE, related_name='galleries')
-    title = models.CharField(max_length=255)
-    slug = models.SlugField(max_length=255, unique=True)
-
-    is_public = models.BooleanField(default=False)
-    gallery_pin = models.CharField(max_length=128, blank=True)
-    expires_at = models.DateTimeField(null=True, blank=True)
-    allow_downloads = models.BooleanField(default=False)
-
-    def save(self, *args, **kwargs):
-        if self.gallery_pin and not self.gallery_pin.startswith(('pbkdf2_', 'argon2')):
-            self.gallery_pin = make_password(self.gallery_pin)
-        super().save(*args, **kwargs)
-
-    def verify_pin(self, raw_pin):
-        return check_password(raw_pin, self.gallery_pin)
-
-    def __str__(self):
-        return self.title
-
-class Image(SoftDeleteModel):
-    """Individual photo files (Legacy)."""
-    gallery = models.ForeignKey(Gallery, on_delete=models.CASCADE, related_name='images')
-    title = models.CharField(max_length=255, blank=True)
-    image = models.ImageField(upload_to=workspace_image_file_path)
-    file_size_bytes = models.BigIntegerField(default=0)
-    order = models.IntegerField(default=0)
+    objects = CustomUserManager()
 
     class Meta:
-        ordering = ['order', '-created_at']
+        verbose_name = _("User")
+        verbose_name_plural = _("Users")
+        db_table = "core_user"
 
     def __str__(self):
-        return self.title if self.title else str(self.id)
-
+        return self.username

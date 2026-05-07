@@ -1,142 +1,163 @@
-x-app-environment: &app-environment
-  DB_HOST: db
-  DB_NAME: devdb
-  DB_USER: devuser
-  DB_PASS: changeme
-  DEBUG: "1"
-  TESTING: "1"
-  SECRET_KEY: your-secret-key-here
-  JWT_SIGNING_KEY: test-signing-key-that-is-at-least-32-bytes-long!!
-  PYTHONPATH: /app
-  PYTHONDONTWRITEBYTECODE: "1"
-  REDIS_URL: redis://redis:6379/1
-  CELERY_BROKER_URL: redis://redis:6379/0
-  CELERY_RESULT_BACKEND: redis://redis:6379/0
-  CLOUDFLARE_R2_ENDPOINT: https://placeholder.r2.cloudflarestorage.com
-  CLOUDFLARE_R2_BUCKET_NAME: test-bucket
-  CLOUDFLARE_ACCESS_KEY_ID: test-access-key
-  CLOUDFLARE_SECRET_ACCESS_KEY: test-secret-key
-  CLOUDFLARE_R2_DOMAIN: placeholder.r2.cloudflarestorage.com
-  CLOUDFLARE_WEBHOOK_SECRET: test-webhook-secret
-  CLOUDINARY_CLOUD_NAME: photobox-app
-  FRONTEND_URL: http://localhost:3000
-  EMAIL_BACKEND: django.core.mail.backends.locmem.EmailBackend
-  LEMON_SQUEEZY_API_KEY: test-key
-  LEMON_SQUEEZY_STORE_ID: "1"
-  LEMON_SQUEEZY_WEBHOOK_SECRET_PRIMARY: test-ls-secret
-  LEMON_SQUEEZY_WEBHOOK_SECRET_SECONDARY: ""
+name: darasa-core
 
-x-app-build: &app-build
+x-darasa-build: &darasa-build
   context: .
+  dockerfile: Dockerfile
   args:
-    DEV: "true"
-    APP_UID: ${APP_UID:-1000}
-    APP_GID: ${APP_GID:-1000}
+    APP_UID: ${HOST_UID:-1000}
+    APP_GID: ${HOST_GID:-1000}
+    POETRY_INSTALL_ARGS: "--with dev,security,chaos"
+
+x-django-environment: &django-environment
+  DJANGO_SETTINGS_MODULE: ${DJANGO_SETTINGS_MODULE:-darasa_project.settings}
+  PYTHONPATH: /workspace/app
+  SECRET_KEY: ${SECRET_KEY:-change-me-local-development-secret-key}
+  DEBUG: ${DARASA_DEBUG:-0}
+  ALLOWED_HOSTS: ${ALLOWED_HOSTS:-localhost,127.0.0.1,django}
+  CSRF_TRUSTED_ORIGINS: ${CSRF_TRUSTED_ORIGINS:-http://localhost:8000,http://127.0.0.1:8000}
+  DJANGO_LOG_LEVEL: ${DJANGO_LOG_LEVEL:-INFO}
+  DATABASE_URL: ${DATABASE_URL:-postgresql://darasa:darasa@postgres:5432/darasa_core}
+  POSTGRES_DB: ${POSTGRES_DB:-darasa_core}
+  POSTGRES_USER: ${POSTGRES_USER:-darasa}
+  POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-darasa}
+  REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+  CACHE_URL: ${CACHE_URL:-redis://redis:6379/1}
+  CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/2}
+  CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://redis:6379/3}
+  CELERY_TASK_ALWAYS_EAGER: ${CELERY_TASK_ALWAYS_EAGER:-0}
+  # Local/dev/CI sample only. Rotate with a generated Fernet key in production.
+  FERNET_ENCRYPTION_KEY: ${FERNET_ENCRYPTION_KEY:-ZGFyYXNhLWNvcmUtbG9jYWwtZGV2LWtleS0wMDAxMjM=}
+  JWT_SIGNING_KEY: ${JWT_SIGNING_KEY:-change-me-jwt-signing-key-at-least-32-bytes}
+  TENANT_PUBLIC_SCHEMA_NAME: ${TENANT_PUBLIC_SCHEMA_NAME:-public}
+  PG_EXTRA_SEARCH_PATHS: "${PG_EXTRA_SEARCH_PATHS:-}"
+  TOXIPROXY_HOST: ${TOXIPROXY_HOST:-toxiproxy}
+  TOXIPROXY_API_PORT: ${TOXIPROXY_API_PORT:-8474}
+  TOXIPROXY_API_URL: ${TOXIPROXY_API_URL:-http://toxiproxy:8474}
+  TOXIPROXY_POSTGRES_PROXY_NAME: ${TOXIPROXY_POSTGRES_PROXY_NAME:-postgres}
+  TOXIPROXY_POSTGRES_HOST: ${TOXIPROXY_POSTGRES_HOST:-toxiproxy}
+  TOXIPROXY_POSTGRES_PORT: ${TOXIPROXY_POSTGRES_PORT:-15432}
+  TOXIPROXY_REDIS_PROXY_NAME: ${TOXIPROXY_REDIS_PROXY_NAME:-redis}
+  TOXIPROXY_REDIS_HOST: ${TOXIPROXY_REDIS_HOST:-toxiproxy}
+  TOXIPROXY_REDIS_PORT: ${TOXIPROXY_REDIS_PORT:-16379}
+  OTEL_SERVICE_NAME: ${OTEL_SERVICE_NAME:-darasa-core}
+  OTEL_TRACES_EXPORTER: ${OTEL_TRACES_EXPORTER:-none}
+  OTEL_METRICS_EXPORTER: ${OTEL_METRICS_EXPORTER:-none}
+  PROMETHEUS_MULTIPROC_DIR: ${PROMETHEUS_MULTIPROC_DIR:-/tmp/prometheus}
 
 services:
-  db:
-    image: postgres:13-alpine
-    volumes:
-      - dev-db-data:/var/lib/postgresql/data
+  postgres:
+    image: postgres:15-alpine
     environment:
-      POSTGRES_DB: devdb
-      POSTGRES_USER: devuser
-      POSTGRES_PASSWORD: changeme
+      POSTGRES_DB: ${POSTGRES_DB:-darasa_core}
+      POSTGRES_USER: ${POSTGRES_USER:-darasa}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-darasa}
+    ports:
+      - "${POSTGRES_HOST_PORT:-5432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U devuser -d devdb"]
-      interval: 10s
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 5s
       timeout: 5s
-      retries: 10
+      retries: 20
       start_period: 10s
 
   redis:
     image: redis:7-alpine
-    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    command:
+      - redis-server
+      - --save
+      - ""
+      - --appendonly
+      - "no"
+      - --maxmemory
+      - 256mb
+      - --maxmemory-policy
+      - allkeys-lru
+    ports:
+      - "${REDIS_HOST_PORT:-6379}:6379"
     volumes:
       - redis-data:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
+      interval: 5s
       timeout: 5s
-      retries: 10
+      retries: 20
       start_period: 5s
 
-  app:
-    build: *app-build
-    working_dir: /app
-    user: "${APP_UID:-1000}:${APP_GID:-1000}"
+  toxiproxy:
+    image: ghcr.io/shopify/toxiproxy:2.9.0
+    command: ["-host=0.0.0.0", "-config=/config/toxiproxy.json"]
     ports:
-      - "${APP_PORT:-8001}:8000"
+      - "${TOXIPROXY_API_HOST_PORT:-8474}:8474"
+      - "${TOXIPROXY_POSTGRES_HOST_PORT:-5433}:15432"
+      - "${TOXIPROXY_REDIS_HOST_PORT:-6380}:16379"
     volumes:
-      - ./app:/app
-      - dev-static-data:/vol/web
-    command: >
-      sh -c "python manage.py wait_for_db &&
-             python manage.py migrate &&
-             python manage.py runserver 0.0.0.0:8000"
-    environment:
-      <<: *app-environment
+      - ./toxiproxy.json:/config/toxiproxy.json:ro
     depends_on:
-      db:
+      postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
-    healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health-check/', timeout=5)"]
-      interval: 15s
-      timeout: 5s
-      retries: 10
-      start_period: 30s
-    mem_limit: 1024m
 
-  celery:
-    build: *app-build
-    working_dir: /app
-    user: "${APP_UID:-1000}:${APP_GID:-1000}"
-    volumes:
-      - ./app:/app
-      - dev-static-data:/vol/web
-    command: >
-      sh -c "python manage.py wait_for_db &&
-             python manage.py migrate &&
-             celery -A app worker --loglevel=info --concurrency=1"
+  django:
+    build: *darasa-build
+    command: ["bash", "/workspace/scripts/run.sh"]
+    working_dir: /workspace/app
     environment:
-      <<: *app-environment
-      TESTING: "0"
+      <<: *django-environment
+    ports:
+      - "${DJANGO_PORT:-8000}:8000"
+    volumes:
+      - .:/workspace
+      - static-data:/vol/web/static
+      - media-data:/vol/web/media
     depends_on:
-      db:
+      postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
-    healthcheck:
-      test: ["CMD-SHELL", "celery -A app inspect ping -d celery@$$HOSTNAME --timeout=5 | grep -q OK"]
-      interval: 20s
-      timeout: 10s
-      retries: 5
-      start_period: 40s
-    mem_limit: 1024m
+      toxiproxy:
+        condition: service_started
 
-  test:
-    profiles: ["test"]
-    build: *app-build
-    working_dir: /app
-    user: "${APP_UID:-1000}:${APP_GID:-1000}"
-    volumes:
-      - ./app:/app
-      - dev-static-data:/vol/web
-    entrypoint: ["/scripts/run-tests.sh"]
-    command: ["unit"]
+  celery-worker:
+    build: *darasa-build
+    command: ["celery", "-A", "darasa_project", "worker", "--loglevel=${CELERY_LOG_LEVEL:-info}"]
+    working_dir: /workspace/app
     environment:
-      <<: *app-environment
-      PYTEST_ADDOPTS: --tb=short -v
+      <<: *django-environment
+    volumes:
+      - .:/workspace
+      - static-data:/vol/web/static
+      - media-data:/vol/web/media
     depends_on:
-      db:
+      postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
-    mem_limit: 1024m
+      toxiproxy:
+        condition: service_started
+
+  celery-beat:
+    build: *darasa-build
+    command: ["celery", "-A", "darasa_project", "beat", "--loglevel=${CELERY_LOG_LEVEL:-info}", "--schedule=/tmp/celerybeat-schedule"]
+    working_dir: /workspace/app
+    environment:
+      <<: *django-environment
+    volumes:
+      - .:/workspace
+      - static-data:/vol/web/static
+      - media-data:/vol/web/media
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      toxiproxy:
+        condition: service_started
 
 volumes:
-  dev-db-data:
-  dev-static-data:
+  postgres-data:
   redis-data:
+  static-data:
+  media-data:

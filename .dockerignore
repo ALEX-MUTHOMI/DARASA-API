@@ -5,11 +5,32 @@
 # Docker
 .docker
 
+# Local env and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+secrets/
+
 # Python
 app/__pycache__/
 app/*/__pycache__/
 app/*/*/__pycache__/
 app/*/*/*/__pycache__/
-.env/
 .venv/
 venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Local/generated noise
+.tmpdeps/
+*.sqlite3
+*.db
+*.log

@@ -1,94 +1,55 @@
-# ─────────────────────────────────────────────────────────────────────────────
-# Makefile — Enterprise test runner commands
-# ─────────────────────────────────────────────────────────────────────────────
-#
-# Usage:
-#   make test-unit          → fast, no external services (CI/pre-commit)
-#   make test-celery        → Celery tasks in eager mode
-#   make test-cloudinary    → real Cloudinary API (needs env vars)
-#   make test-cloudflare    → real Cloudflare Worker (needs staging URL)
-#   make test-e2e           → full photographer flow against staging
-#   make test-all           → everything
-#   make test-coverage      → unit + integration with coverage report
-#
-# Required environment variables for integration/E2E tests:
-#   CLOUDINARY_CLOUD_NAME
-#   CLOUDINARY_API_KEY
-#   CLOUDINARY_API_SECRET
-#   CLOUDFLARE_WORKER_URL
-#   CF_TEST_TOKEN
-#   CELERY_BROKER_URL
-#   STAGING_BASE_URL
-#   E2E_PHOTOGRAPHER_USERNAME
-#   E2E_PHOTOGRAPHER_PASSWORD
-# ─────────────────────────────────────────────────────────────────────────────
+SHELL := /usr/bin/env bash
+.SHELLFLAGS := -eo pipefail -c
 
-.PHONY: test-unit test-celery test-cloudinary test-cloudflare test-e2e test-all test-coverage
+COMPOSE ?= docker compose
+DJANGO_SERVICE ?= django
+HOST_UID ?= $(shell id -u 2>/dev/null || echo 1000)
+HOST_GID ?= $(shell id -g 2>/dev/null || echo 1000)
 
-# Unit tests only — no external services, no broker — safe for pre-commit hooks
-test-unit:
-	pytest tests/ -m "unit" \
-		--timeout=10 \
-		-v \
-		--tb=short
+.PHONY: build up down logs migrate makemigrations test test-chaos lint security \
+	scaffold purge shell django-check
 
-# Celery tasks in eager mode (synchronous, no broker needed)
-test-celery-unit:
-	pytest tests/test_celery_tasks.py -m "celery and unit" \
-		--timeout=30 \
-		-v
+build:
+	$(COMPOSE) build
 
-# Celery integration — requires running Redis
-test-celery-integration:
-	pytest tests/test_celery_tasks.py -m "celery and integration" \
-		--timeout=120 \
-		-v
+up:
+	$(COMPOSE) up
 
-# Cloudinary — hits the real API, creates and deletes real resources
-test-cloudinary:
-	pytest tests/test_cloudinary_integration.py -m cloudinary \
-		--timeout=60 \
-		-v \
-		-s
+down:
+	$(COMPOSE) down --remove-orphans
 
-# Cloudflare — hits the real staging Worker
-test-cloudflare:
-	pytest tests/test_cloudflare_integration.py -m cloudflare \
-		--timeout=60 \
-		-v \
-		-s
+logs:
+	$(COMPOSE) logs -f
 
-# Full E2E — the real photographer flow against staging
-test-e2e:
-	pytest tests/test_e2e_photographer_flow.py -m e2e \
-		--timeout=180 \
-		-v \
-		-s
+migrate:
+	$(COMPOSE) run --rm $(DJANGO_SERVICE) bash -c 'cd /workspace/app && python manage.py migrate'
 
-# API layer tests (unit + schema + auth — mocks external calls)
-test-api:
-	pytest tests/test_api_upload.py \
-		--timeout=30 \
-		-v
+makemigrations:
+	$(COMPOSE) run --rm $(DJANGO_SERVICE) bash -c 'cd /workspace/app && python manage.py makemigrations'
 
-# Everything
-test-all:
-	pytest tests/ \
-		--timeout=180 \
-		-v
+test:
+	$(COMPOSE) run --rm $(DJANGO_SERVICE) bash /workspace/scripts/run-tests.sh unit
 
-# Coverage report (unit + API tests — not integration to avoid flakiness in CI)
-test-coverage:
-	pytest tests/test_api_upload.py tests/test_celery_tasks.py \
-		-m "unit or (celery and unit)" \
-		--cov=photos \
-		--cov-report=term-missing \
-		--cov-report=html:htmlcov \
-		--cov-fail-under=80 \
-		--timeout=30
+test-chaos:
+	$(COMPOSE) run --rm $(DJANGO_SERVICE) bash /workspace/scripts/run-tests.sh chaos
 
-# Parallel execution (faster for large test suites)
-test-parallel:
-	pytest tests/ -m "unit" \
-		-n auto \
-		--timeout=30
+lint:
+	$(COMPOSE) run --rm $(DJANGO_SERVICE) bash -c 'cd /workspace && flake8 app'
+
+security:
+	$(COMPOSE) run --rm $(DJANGO_SERVICE) bash -c 'cd /workspace && bandit -r app -c pyproject.toml && pip-audit'
+
+scaffold:
+	$(COMPOSE) run --rm --user root \
+		-e HOST_UID=$(HOST_UID) \
+		-e HOST_GID=$(HOST_GID) \
+		$(DJANGO_SERVICE) bash /workspace/scripts/scaffold_domains.sh
+
+purge:
+	$(COMPOSE) run --rm --user root $(DJANGO_SERVICE) bash /workspace/scripts/purge_legacy.sh
+
+shell:
+	$(COMPOSE) run --rm $(DJANGO_SERVICE) bash
+
+django-check:
+	$(COMPOSE) run --rm $(DJANGO_SERVICE) bash -c 'cd /workspace/app && python manage.py check'

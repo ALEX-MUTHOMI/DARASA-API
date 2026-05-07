@@ -1,58 +1,67 @@
-FROM python:3.12-slim-bookworm
-LABEL maintainer="Back To Front Development"
+# syntax=docker/dockerfile:1.7
 
-# Force Python to not buffer stdout/stderr, ensuring logs stream instantly.
-ENV PYTHONUNBUFFERED=1 \
-    PATH="/scripts:/py/bin:$PATH"
+FROM python:3.11-slim-bookworm AS base
 
-# 1. DEPENDENCIES FIRST (The Cache Shield)
-# We copy only the requirements and scripts first. 
-# This guarantees pip install is CACHED unless you modify the requirements.txt file.
-COPY ./requirements.txt /tmp/requirements.txt
-COPY ./requirements.dev.txt /tmp/requirements.dev.txt
-COPY ./scripts /scripts
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_NO_CACHE_DIR=1 \
+    POETRY_NO_INTERACTION=1 \
+    POETRY_VIRTUALENVS_CREATE=false \
+    POETRY_VERSION=2.3.4 \
+    VIRTUAL_ENV=/opt/venv \
+    PATH="/opt/venv/bin:/scripts:${PATH}"
 
-# 2. THE HEAVY LIFT (System Setup & Package Installation)
-ARG DEV=false
+FROM base AS builder
+
+ARG POETRY_INSTALL_ARGS="--only main"
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        build-essential \
+        curl \
+        libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN python -m venv /opt/venv \
+    && python -m venv /opt/poetry \
+    && /opt/venv/bin/pip install --upgrade pip setuptools wheel \
+    && /opt/poetry/bin/pip install "poetry==${POETRY_VERSION}"
+
+WORKDIR /build
+COPY pyproject.toml poetry.lock* ./
+
+RUN VIRTUAL_ENV=/opt/venv \
+    PATH="/opt/venv/bin:/opt/poetry/bin:${PATH}" \
+    poetry install --no-root ${POETRY_INSTALL_ARGS}
+
+FROM base AS runtime
+
 ARG APP_UID=1000
 ARG APP_GID=1000
-RUN python -m venv /py && \
-    /py/bin/pip install --upgrade pip && \
-    apt-get update && \
-    # Install runtime dependencies (required for psycopg2 and Pillow)
-    apt-get install -y --no-install-recommends postgresql-client libjpeg-dev && \
-    # Install temporary build dependencies (compilers)
-    apt-get install -y --no-install-recommends build-essential libpq-dev zlib1g-dev && \
-    # Install Python packages
-    /py/bin/pip install -r /tmp/requirements.txt && \
-    if [ $DEV = "true" ]; \
-    then /py/bin/pip install -r /tmp/requirements.dev.txt ; \
-    fi && \
-    # Cleanup: Purge build dependencies and nuke the apt cache to keep the image tiny
-    apt-get purge -y --auto-remove build-essential libpq-dev && \
-    rm -rf /var/lib/apt/lists/* && \
-    rm -rf /tmp && \
-    # Create the unprivileged runtime user with a configurable UID/GID
-    groupadd --gid ${APP_GID} django-user && \
-    useradd --uid ${APP_UID} --gid ${APP_GID} --create-home --shell /usr/sbin/nologin django-user && \
-    # Create runtime volume directories for collected static/media files
-    mkdir -p /vol/web/media && \
-    mkdir -p /vol/web/static && \
-    mkdir -p /home/django-user && \
-    # Set strict ownership and execution permissions
-    chown -R django-user:django-user /vol /home/django-user && \
-    chmod -R 755 /vol && \
-    chmod -R +x /scripts
 
-# 3. COPY THE CODE LAST
-# Now, when you edit views.py or models.py, Docker only rebuilds this specific layer.
-COPY ./app /app
-RUN chown -R django-user:django-user /app
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        bash \
+        ca-certificates \
+        curl \
+        libpq5 \
+        netcat-openbsd \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN groupadd --gid "${APP_GID}" darasa \
+    && useradd --uid "${APP_UID}" --gid "${APP_GID}" --create-home --shell /usr/sbin/nologin darasa \
+    && mkdir -p /app /scripts /vol/web/static /vol/web/media /tmp/prometheus \
+    && chown -R darasa:darasa /app /scripts /vol /tmp/prometheus
+
+COPY --from=builder /opt/venv /opt/venv
+COPY --chown=darasa:darasa ./scripts /scripts
+COPY --chown=darasa:darasa ./app /app
+
 WORKDIR /app
+
 EXPOSE 8000
-ENV HOME="/home/django-user"
 
-# 4. DROP PRIVILEGES
-USER django-user
+USER darasa
 
-CMD ["run.sh"]
+CMD ["bash", "/scripts/run.sh"]

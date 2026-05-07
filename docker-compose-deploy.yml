@@ -40,13 +40,6 @@ services:
       - DB_PASS=${DB_PASS}
       - SECRET_KEY=${DJANGO_SECRET_KEY}
       - ALLOWED_HOSTS=${DJANGO_ALLOWED_HOSTS}
-      - CLOUDFLARE_R2_ENDPOINT=${CLOUDFLARE_R2_ENDPOINT}
-      - CLOUDFLARE_R2_BUCKET_NAME=${CLOUDFLARE_R2_BUCKET_NAME}
-      - CLOUDFLARE_R2_DOMAIN=${CLOUDFLARE_R2_DOMAIN}
-      - CLOUDFLARE_ACCESS_KEY_ID=${CLOUDFLARE_ACCESS_KEY_ID}
-      - CLOUDFLARE_SECRET_ACCESS_KEY=${CLOUDFLARE_SECRET_ACCESS_KEY}
-      - CLOUDFLARE_WEBHOOK_SECRET=${CLOUDFLARE_WEBHOOK_SECRET}
-      - CLOUDINARY_CLOUD_NAME=${CLOUDINARY_CLOUD_NAME}
       - CELERY_BROKER_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
       - CELERY_RESULT_BACKEND=redis://:${REDIS_PASSWORD}@redis:6379/0
       - LEMON_SQUEEZY_API_KEY=${LEMON_SQUEEZY_API_KEY}
@@ -61,7 +54,7 @@ services:
       - db
       - redis
     networks:
-      - photobox_internal
+      - darasa_internal
     deploy:
       resources:
         limits:
@@ -92,7 +85,7 @@ services:
       - POSTGRES_PASSWORD=${DB_PASS}
     # SECURITY: No ports exposed — only accessible via internal network
     networks:
-      - photobox_internal
+      - darasa_internal
     deploy:
       resources:
         limits:
@@ -122,7 +115,7 @@ services:
       --maxmemory-policy allkeys-lru
       --protected-mode yes
     networks:
-      - photobox_internal
+      - darasa_internal
     deploy:
       resources:
         limits:
@@ -144,7 +137,7 @@ services:
     command: [
       "celery", "-A", "app", "worker",
       "--loglevel=warning",          # Less verbose in production
-      "--queues=image-processing,default",
+      "--queues=default",
       "--concurrency=4",
       "--time-limit=600",            # Hard kill after 10 minutes
       "--soft-time-limit=540",       # Graceful SIGTERM at 9 minutes
@@ -161,18 +154,13 @@ services:
       - SECRET_KEY=${DJANGO_SECRET_KEY}
       - CELERY_BROKER_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
       - CELERY_RESULT_BACKEND=redis://:${REDIS_PASSWORD}@redis:6379/0
-      - CLOUDFLARE_R2_ENDPOINT=${CLOUDFLARE_R2_ENDPOINT}
-      - CLOUDFLARE_R2_BUCKET_NAME=${CLOUDFLARE_R2_BUCKET_NAME}
-      - CLOUDFLARE_ACCESS_KEY_ID=${CLOUDFLARE_ACCESS_KEY_ID}
-      - CLOUDFLARE_SECRET_ACCESS_KEY=${CLOUDFLARE_SECRET_ACCESS_KEY}
-      - CLOUDINARY_CLOUD_NAME=${CLOUDINARY_CLOUD_NAME}
       - SENTRY_DSN=${SENTRY_DSN}
       - SENTRY_ENVIRONMENT=production
     depends_on:
       - db
       - redis
     networks:
-      - photobox_internal
+      - darasa_internal
     deploy:
       resources:
         limits:
@@ -207,7 +195,7 @@ services:
       - redis
       - celery
     networks:
-      - photobox_internal
+      - darasa_internal
     deploy:
       resources:
         limits:
@@ -229,7 +217,7 @@ services:
     volumes:
       - static-data:/vol/static
     networks:
-      - photobox_internal
+      - darasa_internal
     deploy:
       resources:
         limits:
@@ -241,7 +229,7 @@ services:
 # NETWORKS — isolated internal network, no external bridge
 # ─────────────────────────────────────────────────────────────────────────────
 networks:
-  photobox_internal:
+  darasa_internal:
     driver: bridge
     internal: false   # Set to true if all external traffic must go through proxy
 
