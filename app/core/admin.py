@@ -1,7 +1,7 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as DjangoUserAdmin
 
-from core.models import CustomUser, Role, TenantUserRole
+from core.models import CustomUser
 
 
 @admin.register(CustomUser)
@@ -55,19 +55,3 @@ class CustomUserAdmin(DjangoUserAdmin):
             },
         ),
     )
-
-
-@admin.register(Role)
-class RoleAdmin(admin.ModelAdmin):
-    list_display = ("name", "is_system_role", "created_at")
-    list_filter = ("is_system_role", "name")
-    search_fields = ("name", "description")
-    ordering = ("name",)
-
-
-@admin.register(TenantUserRole)
-class TenantUserRoleAdmin(admin.ModelAdmin):
-    list_display = ("user", "school", "role", "is_active", "created_at")
-    list_filter = ("role", "is_active", "school")
-    search_fields = ("user__email", "school__name", "role__name")
-    autocomplete_fields = ("user", "school", "role", "granted_by")
