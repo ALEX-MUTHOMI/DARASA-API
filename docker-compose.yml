@@ -10,7 +10,7 @@ x-darasa-build: &darasa-build
 
 x-django-environment: &django-environment
   DJANGO_SETTINGS_MODULE: ${DJANGO_SETTINGS_MODULE:-darasa_project.settings}
-  PYTHONPATH: /app
+  PYTHONPATH: /workspace/app
   SECRET_KEY: ${SECRET_KEY:-change-me-local-development-secret-key}
   DEBUG: ${DARASA_DEBUG:-0}
   ALLOWED_HOSTS: ${ALLOWED_HOSTS:-localhost,127.0.0.1,django}
@@ -29,6 +29,7 @@ x-django-environment: &django-environment
   FERNET_ENCRYPTION_KEY: ${FERNET_ENCRYPTION_KEY:-ZGFyYXNhLWNvcmUtbG9jYWwtZGV2LWtleS0wMDAxMjM=}
   JWT_SIGNING_KEY: ${JWT_SIGNING_KEY:-change-me-jwt-signing-key-at-least-32-bytes}
   TENANT_PUBLIC_SCHEMA_NAME: ${TENANT_PUBLIC_SCHEMA_NAME:-public}
+  PG_EXTRA_SEARCH_PATHS: "${PG_EXTRA_SEARCH_PATHS:-}"
   TOXIPROXY_HOST: ${TOXIPROXY_HOST:-toxiproxy}
   TOXIPROXY_API_PORT: ${TOXIPROXY_API_PORT:-8474}
   TOXIPROXY_API_URL: ${TOXIPROXY_API_URL:-http://toxiproxy:8474}
@@ -101,16 +102,14 @@ services:
 
   django:
     build: *darasa-build
-    command: ["bash", "/scripts/run.sh"]
+    command: ["bash", "/workspace/scripts/run.sh"]
+    working_dir: /workspace/app
     environment:
       <<: *django-environment
     ports:
       - "${DJANGO_PORT:-8000}:8000"
     volumes:
-      - ./app:/app
-      - ./scripts:/scripts:ro
-      - ./pyproject.toml:/app/pyproject.toml:ro
-      - ./.flake8:/app/.flake8:ro
+      - .:/workspace
       - static-data:/vol/web/static
       - media-data:/vol/web/media
     depends_on:
@@ -124,13 +123,11 @@ services:
   celery-worker:
     build: *darasa-build
     command: ["celery", "-A", "darasa_project", "worker", "--loglevel=${CELERY_LOG_LEVEL:-info}"]
+    working_dir: /workspace/app
     environment:
       <<: *django-environment
     volumes:
-      - ./app:/app
-      - ./scripts:/scripts:ro
-      - ./pyproject.toml:/app/pyproject.toml:ro
-      - ./.flake8:/app/.flake8:ro
+      - .:/workspace
       - static-data:/vol/web/static
       - media-data:/vol/web/media
     depends_on:
@@ -144,13 +141,11 @@ services:
   celery-beat:
     build: *darasa-build
     command: ["celery", "-A", "darasa_project", "beat", "--loglevel=${CELERY_LOG_LEVEL:-info}", "--schedule=/tmp/celerybeat-schedule"]
+    working_dir: /workspace/app
     environment:
       <<: *django-environment
     volumes:
-      - ./app:/app
-      - ./scripts:/scripts:ro
-      - ./pyproject.toml:/app/pyproject.toml:ro
-      - ./.flake8:/app/.flake8:ro
+      - .:/workspace
       - static-data:/vol/web/static
       - media-data:/vol/web/media
     depends_on:

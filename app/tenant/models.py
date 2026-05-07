@@ -72,8 +72,14 @@ class School(TenantMixin, TimeStampedModel):
         verbose_name = "School"
         verbose_name_plural = "Schools"
         indexes = [
-            models.Index(fields=["is_active", "created_at"], name="tenant_school_state_idx"),
-            models.Index(fields=["subdomain", "is_active"], name="tenant_school_subdomain_idx"),
+            models.Index(
+                fields=["is_active", "created_at"],
+                name="tenant_school_state_idx",
+            ),
+            models.Index(
+                fields=["subdomain", "is_active"],
+                name="tenant_school_subdomain_idx",
+            ),
         ]
 
     def clean(self) -> None:
@@ -98,7 +104,10 @@ class Domain(TimeStampedModel, DomainMixin):
         verbose_name = "Domain"
         verbose_name_plural = "Domains"
         indexes = [
-            models.Index(fields=["domain", "is_primary"], name="tenant_domain_lookup_idx"),
+            models.Index(
+                fields=["domain", "is_primary"],
+                name="tenant_domain_lookup_idx",
+            ),
         ]
 
     def save(self, *args, **kwargs):

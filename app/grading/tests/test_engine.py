@@ -1,8 +1,9 @@
 import pytest
 from django.core.exceptions import PermissionDenied, ValidationError
+
 from grading.algorithms import CBCTranslator
-from grading.services import BatchGradeService
 from grading.models import GradeRecord
+from grading.services import BatchGradeService
 
 pytestmark = pytest.mark.django_db
 
@@ -10,6 +11,7 @@ pytestmark = pytest.mark.django_db
 # =============================================================================
 # 1. THE ALGORITHM TESTS (Pure Unit)
 # =============================================================================
+
 
 def test_cbc_translator_bounds_and_edge_cases():
     """
@@ -24,17 +26,18 @@ def test_cbc_translator_bounds_and_edge_cases():
     assert CBCTranslator.translate_percentage(49.9) == 1
     assert CBCTranslator.translate_percentage(0.0) == 1
 
+
 def test_cbc_translator_fails_fast_on_invalid_input():
     """
-    Assert the translator strictly enforces bounds via assertions.
+    Assert the translator strictly enforces bounds via explicit exceptions.
     """
-    with pytest.raises(AssertionError):
+    with pytest.raises(ValueError):
         CBCTranslator.translate_percentage(-0.1)
-        
-    with pytest.raises(AssertionError):
+
+    with pytest.raises(ValueError):
         CBCTranslator.translate_percentage(100.1)
-        
-    with pytest.raises(AssertionError):
+
+    with pytest.raises(ValueError):
         CBCTranslator.translate_percentage("80")  # type: ignore
 
 
@@ -42,71 +45,72 @@ def test_cbc_translator_fails_fast_on_invalid_input():
 # 2. THE IDOR & ADVERSARIAL TESTS
 # =============================================================================
 
+
 def test_batch_service_idor_rejection(
-    teacher_user, 
-    subject, 
-    assessment, 
-    student_factory,
+    assessment,
     cohort,
     enrollment_factory,
-    teacher_assignment_factory
+    student_factory,
+    subject,
+    teacher_assignment_factory,
+    teacher_user,
 ):
     """
     SECURITY GATE (IDOR):
     Teacher A attempts to grade a student they are NOT assigned to.
     The service must hard-fail and save NOTHING.
     """
-    # Teacher A is assigned to Cohort 1
     teacher_assignment_factory(teacher=teacher_user, cohort=cohort, subject=subject)
-    
-    # Authorized student
+
     valid_student = student_factory()
     enrollment_factory(student=valid_student, cohort=cohort)
-    
-    # Unauthorized student (Enrolled in Cohort 2, which Teacher A does not have)
+
     invalid_student = student_factory()
-    # No assignment links Teacher A to invalid_student
-    
+
     payload = [
         {"student_uuid": valid_student.id, "raw_score": 90.0},
-        {"student_uuid": invalid_student.id, "raw_score": 85.0}, # The malicious payload
+        {"student_uuid": invalid_student.id, "raw_score": 85.0},
     ]
-    
+
     with pytest.raises(PermissionDenied) as exc:
         BatchGradeService.submit_fast_grid_payload(
-            teacher_user, assessment.id, subject.id, payload
+            teacher_user,
+            assessment.id,
+            subject.id,
+            payload,
         )
-        
+
     assert "not authorized" in str(exc.value)
-    # Ensure atomic rollback / no partial writes occurred
     assert GradeRecord.objects.count() == 0
 
 
 def test_payload_validation_fails_fast(
-    teacher_user, 
-    subject, 
-    assessment, 
-    student_factory,
+    assessment,
     cohort,
     enrollment_factory,
-    teacher_assignment_factory
+    student_factory,
+    subject,
+    teacher_assignment_factory,
+    teacher_user,
 ):
     """
     AUTONOMOUS SECURITY GATE:
-    Ensure malformed payloads (e.g., string injected into raw_score) are caught
-    BEFORE touching the database to prevent psycopg2 DataErrors.
+    Ensure malformed payloads are caught before touching the database.
     """
     teacher_assignment_factory(teacher=teacher_user, cohort=cohort, subject=subject)
     student = student_factory()
     enrollment_factory(student=student, cohort=cohort)
-    
+
     payload = [{"student_uuid": student.id, "raw_score": "DROP TABLE students; --"}]
-    
+
     with pytest.raises(ValidationError) as exc:
         BatchGradeService.submit_fast_grid_payload(
-            teacher_user, assessment.id, subject.id, payload
+            teacher_user,
+            assessment.id,
+            subject.id,
+            payload,
         )
-    
+
     assert "Invalid raw_score format" in str(exc.value)
 
 
@@ -114,72 +118,81 @@ def test_payload_validation_fails_fast(
 # 3. THE O(1) BULK PERFORMANCE TEST
 # =============================================================================
 
+
 def test_o1_bulk_performance_is_constant(
-    django_assert_max_num_queries,
-    teacher_user, 
-    subject, 
-    assessment, 
-    student_factory,
+    assessment,
     cohort,
+    django_assert_max_num_queries,
     enrollment_factory,
-    teacher_assignment_factory
+    student_factory,
+    subject,
+    teacher_assignment_factory,
+    teacher_user,
 ):
     """
     PERFORMANCE GATE:
-    Assert that submitting 50 grades takes EXACTLY the same number of DB writes
-    as submitting 1 grade. Expected: 2 Queries (1 Auth, 1 bulk_create upsert).
+    Assert that submitting 50 grades has a stable DB query count.
     """
     teacher_assignment_factory(teacher=teacher_user, cohort=cohort, subject=subject)
-    
+
     payload = []
-    # Generate 50 students
     for i in range(50):
         student = student_factory()
         enrollment_factory(student=student, cohort=cohort)
-        payload.append({
-            "student_uuid": student.id,
-            "raw_score": float(i + 50) % 100, # valid 0-100
-        })
+        payload.append(
+            {
+                "student_uuid": student.id,
+                "raw_score": float(i + 50) % 100,
+            }
+        )
 
-    # Assert exactly 2 queries are fired regardless of N=50.
-    # Depending on DB backend, transaction management might add BEGIN/COMMIT,
-    # so we assert max 4 to be safe (BEGIN, SELECT auth, INSERT ON CONFLICT, COMMIT).
     with django_assert_max_num_queries(4):
         processed = BatchGradeService.submit_fast_grid_payload(
-            teacher_user, assessment.id, subject.id, payload
+            teacher_user,
+            assessment.id,
+            subject.id,
+            payload,
         )
-        
+
     assert processed == 50
     assert GradeRecord.objects.count() == 50
 
 
 def test_occ_versioning_upsert(
-    teacher_user, 
-    subject, 
-    assessment, 
-    student_factory,
+    assessment,
     cohort,
     enrollment_factory,
-    teacher_assignment_factory
+    student_factory,
+    subject,
+    teacher_assignment_factory,
+    teacher_user,
 ):
     """
     AUTONOMOUS CONCURRENCY GATE:
-    Verify that update_conflicts successfully overwrites existing grades 
+    Verify that update_conflicts successfully overwrites existing grades
     without causing IntegrityErrors (UniqueConstraint violations).
     """
     teacher_assignment_factory(teacher=teacher_user, cohort=cohort, subject=subject)
     student = student_factory()
     enrollment_factory(student=student, cohort=cohort)
-    
+
     payload_initial = [{"student_uuid": student.id, "raw_score": 50.0}]
-    BatchGradeService.submit_fast_grid_payload(teacher_user, assessment.id, subject.id, payload_initial)
-    
+    BatchGradeService.submit_fast_grid_payload(
+        teacher_user,
+        assessment.id,
+        subject.id,
+        payload_initial,
+    )
+
     assert GradeRecord.objects.get(student=student).cbc_score == 2
-    
-    # Overwrite payload
+
     payload_update = [{"student_uuid": student.id, "raw_score": 90.0}]
-    BatchGradeService.submit_fast_grid_payload(teacher_user, assessment.id, subject.id, payload_update)
-    
-    # Assert overwritten cleanly
+    BatchGradeService.submit_fast_grid_payload(
+        teacher_user,
+        assessment.id,
+        subject.id,
+        payload_update,
+    )
+
     assert GradeRecord.objects.count() == 1
     assert GradeRecord.objects.get(student=student).cbc_score == 4

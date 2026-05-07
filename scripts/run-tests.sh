@@ -8,8 +8,12 @@ if [ "$#" -gt 0 ]; then
   shift
 fi
 
-if [ ! -f "manage.py" ] && [ ! -f "pyproject.toml" ] && [ -f "app/manage.py" ]; then
-  cd app
+if [ -f "/workspace/pyproject.toml" ]; then
+  cd /workspace
+elif [ ! -f "pyproject.toml" ] && [ -f "../pyproject.toml" ]; then
+  cd ..
+elif [ ! -f "pyproject.toml" ] && [ -f "app/manage.py" ]; then
+  :
 fi
 
 if [ -f "pytest.ini" ]; then

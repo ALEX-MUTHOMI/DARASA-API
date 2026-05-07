@@ -30,7 +30,7 @@ RUN python -m venv /opt/venv \
 WORKDIR /build
 COPY pyproject.toml poetry.lock* ./
 
-RUN poetry install --no-root --sync ${POETRY_INSTALL_ARGS}
+RUN poetry install --no-root ${POETRY_INSTALL_ARGS}
 
 FROM base AS runtime
 

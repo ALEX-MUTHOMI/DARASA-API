@@ -96,7 +96,18 @@ exclude_lines = [
 [tool.bandit]
 exclude_dirs = [
     ".venv",
+    ".git",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".tmpdeps",
+    "__pycache__",
+    "build",
+    "dist",
     "htmlcov",
+    "migrations",
+    "tests",
+    "app/*/migrations",
     "app/*/tests",
 ]
 

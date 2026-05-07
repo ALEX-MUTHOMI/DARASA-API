@@ -11,7 +11,9 @@ LOG_LEVEL="${GUNICORN_LOG_LEVEL:-info}"
 echo "Starting Darasa-Core Django runtime"
 echo "Python: $(python --version)"
 
-if [ ! -f "manage.py" ] && [ -f "app/manage.py" ]; then
+if [ -f "/workspace/app/manage.py" ]; then
+  cd /workspace/app
+elif [ ! -f "manage.py" ] && [ -f "app/manage.py" ]; then
   cd app
 fi
 

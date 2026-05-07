@@ -34,6 +34,8 @@ env = environ.Env(
     CSRF_TRUSTED_ORIGINS=(list, []),
     DEFAULT_FROM_EMAIL=(str, "Darasa <no-reply@darasa.ac.ke>"),
     SERVER_EMAIL=(str, "server@darasa.ac.ke"),
+    TENANT_PUBLIC_SCHEMA_NAME=(str, "public"),
+    PG_EXTRA_SEARCH_PATHS=(list, []),
 )
 
 environ.Env.read_env(BASE_DIR / ".env")
@@ -76,7 +78,8 @@ def _build_database_url() -> str:
         return f"sqlite:///{(BASE_DIR / 'test_db.sqlite3').as_posix()}"
 
     raise ImproperlyConfigured(
-        "Database configuration is missing. Set DATABASE_URL or DB_HOST/DB_PORT/DB_NAME/DB_USER/DB_PASS."
+        "Database configuration is missing. Set DATABASE_URL or "
+        "DB_HOST/DB_PORT/DB_NAME/DB_USER/DB_PASS."
     )
 
 
@@ -106,9 +109,29 @@ AUTH_USER_MODEL = "core.CustomUser"
 
 TENANT_MODEL = "tenant.School"
 TENANT_DOMAIN_MODEL = "tenant.Domain"
-PUBLIC_SCHEMA_NAME = "public"
+PUBLIC_SCHEMA_NAME = env("TENANT_PUBLIC_SCHEMA_NAME", default="public").strip()
+PUBLIC_SCHEMA_NAME = PUBLIC_SCHEMA_NAME or "public"
 PUBLIC_SCHEMA_URLCONF = "darasa_project.urls"
-PG_EXTRA_SEARCH_PATHS = ["public"]
+
+
+def _build_pg_extra_search_paths(public_schema_name: str) -> list[str]:
+    forbidden_schema_names = {"public", public_schema_name.lower()}
+    configured_paths = env.list("PG_EXTRA_SEARCH_PATHS", default=[])
+    safe_paths: list[str] = []
+
+    for path in configured_paths:
+        normalized_path = str(path).strip()
+        if not normalized_path:
+            continue
+        if normalized_path.lower() in forbidden_schema_names:
+            continue
+        if normalized_path not in safe_paths:
+            safe_paths.append(normalized_path)
+
+    return safe_paths
+
+
+PG_EXTRA_SEARCH_PATHS = _build_pg_extra_search_paths(PUBLIC_SCHEMA_NAME)
 SHOW_PUBLIC_IF_NO_TENANT_FOUND = False
 
 SHARED_APPS = [
@@ -141,7 +164,9 @@ TENANT_APPS = [
     "bus",
 ]
 
-INSTALLED_APPS = SHARED_APPS + [app_name for app_name in TENANT_APPS if app_name not in SHARED_APPS]
+INSTALLED_APPS = SHARED_APPS + [
+    app_name for app_name in TENANT_APPS if app_name not in SHARED_APPS
+]
 
 MIDDLEWARE = [
     "django_tenants.middleware.main.TenantMainMiddleware",
@@ -193,7 +218,12 @@ if DATABASES["default"]["ENGINE"] != "django.db.backends.sqlite3":
 DATABASE_ROUTERS = ["django_tenants.routers.TenantSyncRouter"]
 
 AUTH_PASSWORD_VALIDATORS = [
-    {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
+    {
+        "NAME": (
+            "django.contrib.auth.password_validation."
+            "UserAttributeSimilarityValidator"
+        )
+    },
     {
         "NAME": "django.contrib.auth.password_validation.MinimumLengthValidator",
         "OPTIONS": {"min_length": 12},
@@ -249,7 +279,9 @@ REST_FRAMEWORK: dict[str, Any] = {
     "DEFAULT_RENDERER_CLASSES": ["rest_framework.renderers.JSONRenderer"],
 }
 if DEBUG:
-    REST_FRAMEWORK["DEFAULT_RENDERER_CLASSES"].append("rest_framework.renderers.BrowsableAPIRenderer")
+    REST_FRAMEWORK["DEFAULT_RENDERER_CLASSES"].append(
+        "rest_framework.renderers.BrowsableAPIRenderer"
+    )
 
 SIMPLE_JWT = {
     "ACCESS_TOKEN_LIFETIME": timedelta(minutes=15),
@@ -293,9 +325,15 @@ CELERY_BEAT_SCHEDULER = "django_celery_beat.schedulers:DatabaseScheduler"
 
 FERNET_ENCRYPTION_KEY = env("FERNET_ENCRYPTION_KEY", default="")
 
-DEFAULT_FROM_EMAIL = env("DEFAULT_FROM_EMAIL", default="Darasa <no-reply@darasa.ac.ke>")
+DEFAULT_FROM_EMAIL = env(
+    "DEFAULT_FROM_EMAIL",
+    default="Darasa <no-reply@darasa.ac.ke>",
+)
 SERVER_EMAIL = env("SERVER_EMAIL", default="server@darasa.ac.ke")
-EMAIL_BACKEND = env("EMAIL_BACKEND", default="django.core.mail.backends.console.EmailBackend")
+EMAIL_BACKEND = env(
+    "EMAIL_BACKEND",
+    default="django.core.mail.backends.console.EmailBackend",
+)
 EMAIL_HOST = env("EMAIL_HOST", default="smtp.sendgrid.net")
 EMAIL_PORT = env.int("EMAIL_PORT", default=587)
 EMAIL_HOST_USER = env("EMAIL_HOST_USER", default="")

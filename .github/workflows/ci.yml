@@ -134,6 +134,7 @@ jobs:
       # Local/dev/CI sample only. Rotate with a generated Fernet key in production.
       FERNET_ENCRYPTION_KEY: ZGFyYXNhLWNvcmUtbG9jYWwtZGV2LWtleS0wMDAxMjM=
       TENANT_PUBLIC_SCHEMA_NAME: public
+      PG_EXTRA_SEARCH_PATHS: ""
       DJANGO_LOG_LEVEL: WARNING
       OTEL_SERVICE_NAME: darasa-core-ci
       OTEL_TRACES_EXPORTER: none
@@ -209,6 +210,7 @@ jobs:
       # Local/dev/CI sample only. Rotate with a generated Fernet key in production.
       FERNET_ENCRYPTION_KEY: ZGFyYXNhLWNvcmUtbG9jYWwtZGV2LWtleS0wMDAxMjM=
       TENANT_PUBLIC_SCHEMA_NAME: public
+      PG_EXTRA_SEARCH_PATHS: ""
       DJANGO_LOG_LEVEL: WARNING
       OTEL_SERVICE_NAME: darasa-core-ci
       OTEL_TRACES_EXPORTER: none
