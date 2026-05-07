@@ -5,7 +5,7 @@ from django.db import IntegrityError
 from academics.models import Cohort
 from academics.selectors import get_fast_grid_roster
 
-pytestmark = pytest.mark.django_db
+pytestmark = [pytest.mark.django_db, pytest.mark.phase3]
 
 
 def test_fast_grid_idor_prevention(

@@ -62,6 +62,13 @@ python_functions = ["test_*"]
 addopts = "--strict-config --strict-markers --tb=short"
 markers = [
     "unit: deterministic tests that do not require network access",
+    "phase1: foundation-safe tests for Phase 1 CI",
+    "phase2: tenant/core identity and access-control foundation tests",
+    "phase3: academics domain tests",
+    "phase4: curriculum and rubric domain tests",
+    "phase5: event backbone and async boundary tests",
+    "phase6: grading engine and assessment workflow tests",
+    "future: tests intentionally deferred from the current phase",
     "integration: tests that require database, cache, or task infrastructure",
     "security: authorization, isolation, and misuse-resistance tests",
     "chaos: opt-in fault-injection tests that use Toxiproxy",

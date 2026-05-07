@@ -2,7 +2,7 @@ import pytest
 
 from academics.selectors import get_fast_grid_roster
 
-pytestmark = pytest.mark.django_db
+pytestmark = [pytest.mark.django_db, pytest.mark.phase3]
 
 
 def test_fast_grid_roster_performance_o1_queries(

@@ -3,6 +3,7 @@ set -eo pipefail
 
 MODE="${1:-unit}"
 PYTEST_CONFIG_ARGS=()
+PHASE1_MARKER_EXPRESSION="not chaos and not integration and not phase2 and not phase3 and not phase4 and not phase5 and not phase6 and not future"
 
 if [ "$#" -gt 0 ]; then
   shift
@@ -21,9 +22,13 @@ if [ -f "pytest.ini" ]; then
 fi
 
 case "${MODE}" in
-  unit|default)
-    echo "Running pytest without chaos tests"
-    exec poetry run pytest "${PYTEST_CONFIG_ARGS[@]}" -m "not chaos" "$@"
+  unit|default|phase1)
+    echo "Running Phase 1-safe pytest selection"
+    exec poetry run pytest "${PYTEST_CONFIG_ARGS[@]}" -m "${PHASE1_MARKER_EXPRESSION}" "$@"
+    ;;
+  phase2|phase3|phase4|phase5|phase6|future|integration)
+    echo "Running opt-in pytest marker: ${MODE}"
+    exec poetry run pytest "${PYTEST_CONFIG_ARGS[@]}" -m "${MODE}" "$@"
     ;;
   chaos)
     echo "Running opt-in chaos tests"

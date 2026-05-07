@@ -5,7 +5,7 @@ from grading.algorithms import CBCTranslator
 from grading.models import GradeRecord
 from grading.services import BatchGradeService
 
-pytestmark = pytest.mark.django_db
+pytestmark = [pytest.mark.django_db, pytest.mark.phase6]
 
 
 # =============================================================================
