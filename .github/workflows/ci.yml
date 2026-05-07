@@ -24,12 +24,7 @@ jobs:
     strategy:
       fail-fast: false
     steps:
-      - name: Fetch source
-        run: |
-          git init .
-          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}"
-          git -c http.extraheader="AUTHORIZATION: bearer ${{ github.token }}" fetch --depth=1 origin "${GITHUB_SHA}"
-          git switch --detach FETCH_HEAD
+      - uses: actions/checkout@v4
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -67,12 +62,7 @@ jobs:
     strategy:
       fail-fast: false
     steps:
-      - name: Fetch source
-        run: |
-          git init .
-          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}"
-          git -c http.extraheader="AUTHORIZATION: bearer ${{ github.token }}" fetch --depth=1 origin "${GITHUB_SHA}"
-          git switch --detach FETCH_HEAD
+      - uses: actions/checkout@v4
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -97,12 +87,7 @@ jobs:
     strategy:
       fail-fast: false
     steps:
-      - name: Fetch source
-        run: |
-          git init .
-          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}"
-          git -c http.extraheader="AUTHORIZATION: bearer ${{ github.token }}" fetch --depth=1 origin "${GITHUB_SHA}"
-          git switch --detach FETCH_HEAD
+      - uses: actions/checkout@v4
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -146,7 +131,8 @@ jobs:
       CELERY_BROKER_URL: redis://127.0.0.1:6379/2
       CELERY_RESULT_BACKEND: redis://127.0.0.1:6379/3
       JWT_SIGNING_KEY: ci-jwt-signing-key-at-least-32-bytes
-      FERNET_ENCRYPTION_KEY: CHANGE-ME-generate-with-python-cryptography-fernet
+      # Local/dev/CI sample only. Rotate with a generated Fernet key in production.
+      FERNET_ENCRYPTION_KEY: ZGFyYXNhLWNvcmUtbG9jYWwtZGV2LWtleS0wMDAxMjM=
       TENANT_PUBLIC_SCHEMA_NAME: public
       DJANGO_LOG_LEVEL: WARNING
       OTEL_SERVICE_NAME: darasa-core-ci
@@ -176,12 +162,7 @@ jobs:
           --health-timeout 5s
           --health-retries 20
     steps:
-      - name: Fetch source
-        run: |
-          git init .
-          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}"
-          git -c http.extraheader="AUTHORIZATION: bearer ${{ github.token }}" fetch --depth=1 origin "${GITHUB_SHA}"
-          git switch --detach FETCH_HEAD
+      - uses: actions/checkout@v4
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -225,7 +206,8 @@ jobs:
       CELERY_BROKER_URL: redis://127.0.0.1:6379/2
       CELERY_RESULT_BACKEND: redis://127.0.0.1:6379/3
       JWT_SIGNING_KEY: ci-jwt-signing-key-at-least-32-bytes
-      FERNET_ENCRYPTION_KEY: CHANGE-ME-generate-with-python-cryptography-fernet
+      # Local/dev/CI sample only. Rotate with a generated Fernet key in production.
+      FERNET_ENCRYPTION_KEY: ZGFyYXNhLWNvcmUtbG9jYWwtZGV2LWtleS0wMDAxMjM=
       TENANT_PUBLIC_SCHEMA_NAME: public
       DJANGO_LOG_LEVEL: WARNING
       OTEL_SERVICE_NAME: darasa-core-ci
@@ -255,12 +237,7 @@ jobs:
           --health-timeout 5s
           --health-retries 20
     steps:
-      - name: Fetch source
-        run: |
-          git init .
-          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}"
-          git -c http.extraheader="AUTHORIZATION: bearer ${{ github.token }}" fetch --depth=1 origin "${GITHUB_SHA}"
-          git switch --detach FETCH_HEAD
+      - uses: actions/checkout@v4
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -285,12 +262,7 @@ jobs:
     strategy:
       fail-fast: false
     steps:
-      - name: Fetch source
-        run: |
-          git init .
-          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}"
-          git -c http.extraheader="AUTHORIZATION: bearer ${{ github.token }}" fetch --depth=1 origin "${GITHUB_SHA}"
-          git switch --detach FETCH_HEAD
+      - uses: actions/checkout@v4
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3

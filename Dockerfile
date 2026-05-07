@@ -28,7 +28,7 @@ RUN python -m venv /opt/venv \
     && pip install "poetry==${POETRY_VERSION}"
 
 WORKDIR /build
-COPY pyproject.toml ./
+COPY pyproject.toml poetry.lock* ./
 
 RUN poetry install --no-root --sync ${POETRY_INSTALL_ARGS}
 

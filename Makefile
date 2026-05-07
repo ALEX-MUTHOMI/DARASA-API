@@ -37,7 +37,7 @@ lint:
 	$(COMPOSE) run --rm $(DJANGO_SERVICE) poetry run flake8 --config .flake8 .
 
 security:
-	$(COMPOSE) run --rm $(DJANGO_SERVICE) bash -lc 'poetry run bandit -r app -c pyproject.toml && poetry run pip-audit'
+	$(COMPOSE) run --rm $(DJANGO_SERVICE) bash -lc 'poetry run bandit -r . -c pyproject.toml && poetry run pip-audit'
 
 scaffold:
 	$(COMPOSE) run --rm --user root \

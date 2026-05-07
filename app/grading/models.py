@@ -1,7 +1,7 @@
 """
 grading/models.py
 =================
-Immutable Ledger for the CBC Grading Engine
+Immutable Grade Record for the CBC Grading Engine
 Back To Front Development
 
 SECURITY & CONCURRENCY:
@@ -52,7 +52,7 @@ class ExamAssessment(TimeStampedModel):
 
 class GradeRecord(TimeStampedModel):
     """
-    The Core Ledger Entry.
+    The core grade history entry.
     """
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     
