@@ -7,12 +7,12 @@ from urllib.parse import urlparse
 
 from django.core.exceptions import ValidationError
 from django.core.validators import validate_email
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.utils.text import slugify
 from django_tenants.utils import get_public_schema_name, schema_context
 
 from core.models import CustomUser, Role, TenantUserRole
-from tenant.models import Domain, School
+from tenant.models import Domain, RESERVED_SUBDOMAINS, School
 
 HOSTNAME_LABEL_RE = re.compile(
     r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$"
@@ -41,54 +41,76 @@ class TenantProvisioningService:
         admin_email = cls._normalize_admin_email(admin_email)
         admin_password = cls._require_secret(admin_password, "admin_password")
 
-        with transaction.atomic():
-            with schema_context(get_public_schema_name()):
-                normalized_domain = cls._normalize_domain(domain_string)
-                if Domain.objects.filter(domain=normalized_domain).exists():
-                    raise ValueError("domain_string cannot be provisioned")
-                subdomain = cls._build_subdomain(normalized_domain)
-                schema_name = cls._build_unique_schema_name(school_name, subdomain)
-                school_code = cls._build_unique_school_code()
+        try:
+            with transaction.atomic():
+                with schema_context(get_public_schema_name()):
+                    return cls._provision_in_public_schema(
+                        school_name=school_name,
+                        domain_string=domain_string,
+                        admin_email=admin_email,
+                        admin_password=admin_password,
+                    )
+        except IntegrityError as exc:
+            raise ValueError("tenant cannot be provisioned") from exc
 
-                school = School.objects.create(
-                    name=school_name,
-                    schema_name=schema_name,
-                    subdomain=subdomain,
-                    school_code=school_code,
-                    contact_email=admin_email,
-                    is_active=True,
-                    on_trial=True,
-                )
+    @classmethod
+    def _provision_in_public_schema(
+        cls,
+        *,
+        school_name: str,
+        domain_string: str,
+        admin_email: str,
+        admin_password: str,
+    ) -> ProvisionedTenantContext:
+        normalized_domain = cls._normalize_domain(domain_string)
+        if Domain.objects.filter(domain=normalized_domain).exists():
+            raise ValueError("domain_string cannot be provisioned")
+        subdomain = cls._build_subdomain(normalized_domain)
+        if School.objects.filter(subdomain=subdomain).exists():
+            raise ValueError("domain_string cannot be provisioned")
+        if CustomUser.objects.filter(email=admin_email).exists():
+            raise ValueError("admin account cannot be provisioned")
+        schema_name = cls._build_unique_schema_name(school_name, subdomain)
+        school_code = cls._build_unique_school_code()
 
-                domain = Domain.objects.create(
-                    tenant=school,
-                    domain=normalized_domain,
-                    is_primary=True,
-                )
+        school = School.objects.create(
+            name=school_name,
+            schema_name=schema_name,
+            subdomain=subdomain,
+            school_code=school_code,
+            contact_email=admin_email,
+            is_active=True,
+            on_trial=True,
+        )
 
-                principal = CustomUser.objects.create_user(
-                    email=admin_email,
-                    password=admin_password,
-                    is_active=True,
-                    is_staff=True,
-                )
+        domain = Domain.objects.create(
+            tenant=school,
+            domain=normalized_domain,
+            is_primary=True,
+        )
 
-                principal_role, _ = Role.objects.get_or_create(
-                    name=Role.RoleName.PRINCIPAL,
-                    defaults={
-                        "description": (
-                            "Tenant principal with school-wide administrative access."
-                        )
-                    },
-                )
+        principal = CustomUser.objects.create_user(
+            email=admin_email,
+            password=admin_password,
+            is_active=True,
+            is_staff=True,
+        )
 
-                role_binding = TenantUserRole.objects.create(
-                    user=principal,
-                    school=school,
-                    role=principal_role,
-                    granted_by=principal,
-                    is_active=True,
-                )
+        principal_role, _ = Role.objects.get_or_create(
+            code=Role.RoleCode.PRINCIPAL,
+            defaults={
+                "name": Role.RoleCode.PRINCIPAL.label,
+                "description": "School-wide administrative capability.",
+            },
+        )
+
+        role_binding = TenantUserRole.objects.create(
+            user=principal,
+            tenant=school,
+            role=principal_role,
+            assigned_by=principal,
+            is_active=True,
+        )
 
         return ProvisionedTenantContext(
             school=school,
@@ -130,11 +152,24 @@ class TenantProvisioningService:
         )
         try:
             hostname = (parsed.hostname or "").strip().rstrip(".").lower()
+            port = parsed.port
         except ValueError as exc:
             raise ValueError("domain_string is invalid") from exc
 
         if not hostname:
             raise ValueError("domain_string must contain a resolvable hostname")
+        if not hostname.isascii():
+            raise ValueError("domain_string is invalid")
+        if (
+            parsed.path not in {"", "/"}
+            or parsed.params
+            or parsed.query
+            or parsed.fragment
+            or parsed.username
+            or parsed.password
+            or port is not None
+        ):
+            raise ValueError("domain_string is invalid")
 
         try:
             normalized_domain = hostname.encode("idna").decode("ascii")
@@ -144,6 +179,7 @@ class TenantProvisioningService:
         labels = normalized_domain.split(".")
         if (
             len(normalized_domain) > 253
+            or len(labels) < 2
             or any(not label for label in labels)
             or any(not HOSTNAME_LABEL_RE.fullmatch(label) for label in labels)
         ):
@@ -155,7 +191,7 @@ class TenantProvisioningService:
     def _build_subdomain(cls, normalized_domain: str) -> str:
         leftmost_label = normalized_domain.split(".", 1)[0]
         slug = slugify(leftmost_label).replace("-", "-")
-        if not slug:
+        if not slug or slug in RESERVED_SUBDOMAINS:
             raise ValueError("domain_string must contain a valid leftmost label")
         return slug[:63]
 
