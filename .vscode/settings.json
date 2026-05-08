@@ -27,8 +27,9 @@
     "python.testing.unittestEnabled": false,
     "python.testing.pytestArgs": [
         "app",
+        "--ignore=app/grading/tests",
         "-m",
-        "not chaos and not phase4 and not phase5 and not phase6 and not future"
+        "not chaos and not integration and not phase4 and not phase5 and not phase6 and not future"
     ],
     "python.linting.enabled": true,
     "python.linting.pylintEnabled": true,

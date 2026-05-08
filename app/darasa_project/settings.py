@@ -161,12 +161,14 @@ SHARED_APPS = [
 
 TENANT_APPS = [
     "django.contrib.contenttypes",
-    "grading",
     "curriculum",
     "disciplinary",
     "portals",
     "bus",
 ]
+
+# Phase 6 quarantine: grading contains future-phase models and must remain
+# inactive until the grading engine phase creates intentional migrations.
 
 INSTALLED_APPS = SHARED_APPS + [
     app_name for app_name in TENANT_APPS if app_name not in SHARED_APPS
@@ -318,7 +320,6 @@ CELERY_TASK_DEFAULT_QUEUE = "bus"
 CELERY_TASK_ROUTES = {
     "bus.tasks.*": {"queue": "bus"},
     "academics.tasks.*": {"queue": "academics"},
-    "grading.tasks.*": {"queue": "grading"},
     "curriculum.tasks.*": {"queue": "curriculum"},
     "disciplinary.tasks.*": {"queue": "disciplinary"},
     "portals.tasks.*": {"queue": "portals"},
