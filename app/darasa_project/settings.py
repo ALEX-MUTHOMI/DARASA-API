@@ -156,11 +156,11 @@ SHARED_APPS = [
     "drf_spectacular",
     "tenant",
     "core",
+    "academics",
 ]
 
 TENANT_APPS = [
     "django.contrib.contenttypes",
-    "academics",
     "grading",
     "curriculum",
     "disciplinary",

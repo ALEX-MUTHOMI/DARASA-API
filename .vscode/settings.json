@@ -28,7 +28,7 @@
     "python.testing.pytestArgs": [
         "app",
         "-m",
-        "not chaos and not phase3 and not phase4 and not phase5 and not phase6 and not future"
+        "not chaos and not phase4 and not phase5 and not phase6 and not future"
     ],
     "python.linting.enabled": true,
     "python.linting.pylintEnabled": true,
