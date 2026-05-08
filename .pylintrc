@@ -1,0 +1,26 @@
+[MASTER]
+init-hook='import sys; from pathlib import Path; sys.path.insert(0, str(Path.cwd() / "app"))'
+ignore=migrations
+jobs=0
+
+[MESSAGES CONTROL]
+disable=
+    missing-module-docstring,
+    missing-class-docstring,
+    missing-function-docstring,
+    too-few-public-methods,
+    no-member,
+    unused-argument
+
+[FORMAT]
+max-line-length=88
+
+[DESIGN]
+max-args=8
+
+[TYPECHECK]
+generated-members=
+    objects,
+    id,
+    pk,
+    *_id

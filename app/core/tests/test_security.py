@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from statistics import mean
 from time import perf_counter
+from typing import Any
 
 import pytest
 from rest_framework import status
@@ -13,14 +14,14 @@ from portals.views import (
 )
 
 
-def _invoke_parent_login(view, admission_number: str) -> tuple[object, float]:
+def _invoke_parent_login(view, admission_number: str) -> tuple[Any, float]:
     request = APIRequestFactory().post(
         "/api/portals/parent/login/",
         {"admission_number": admission_number},
         format="json",
     )
     started_at = perf_counter()
-    response = view(request)
+    response: Any = view(request)
     response.render()
     duration = perf_counter() - started_at
     return response, duration

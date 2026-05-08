@@ -29,6 +29,13 @@ Chaos tests are opt-in:
 make test-chaos
 ```
 
+## Developer Environment
+
+Darasa-Core is Docker-first and Poetry-compatible. CI is the source of truth for
+quality gates; VS Code should use either the Poetry virtual environment or the
+Docker Compose commands above. See `docs/DEVELOPER_ENVIRONMENT.md` for Pylance,
+Pylint, and interpreter setup guidance.
+
 ## Runtime Layout
 
 - Django project: `app/darasa_project`

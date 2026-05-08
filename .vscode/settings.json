@@ -1,3 +1,38 @@
 {
-    "makefile.configureOnOpen": false
+    "makefile.configureOnOpen": false,
+    "python.defaultInterpreterPath": "${workspaceFolder}/.venv",
+    "python.terminal.activateEnvironment": true,
+    "python.analysis.extraPaths": [
+        "${workspaceFolder}/app"
+    ],
+    "python.analysis.autoSearchPaths": true,
+    "python.analysis.useLibraryCodeForTypes": true,
+    "python.analysis.typeCheckingMode": "basic",
+    "python.analysis.diagnosticMode": "workspace",
+    "python.analysis.exclude": [
+        "**/__pycache__",
+        "**/.pytest_cache",
+        "**/migrations/**",
+        ".tmpdeps",
+        ".venv"
+    ],
+    "python.analysis.diagnosticSeverityOverrides": {
+        "reportMissingImports": "warning",
+        "reportMissingModuleSource": "information",
+        "reportAttributeAccessIssue": "warning",
+        "reportOptionalMemberAccess": "warning"
+    },
+    "python.envFile": "${workspaceFolder}/.env",
+    "python.testing.pytestEnabled": true,
+    "python.testing.unittestEnabled": false,
+    "python.testing.pytestArgs": [
+        "app",
+        "-m",
+        "not chaos and not phase3 and not phase4 and not phase5 and not phase6 and not future"
+    ],
+    "python.linting.enabled": true,
+    "python.linting.pylintEnabled": true,
+    "pylint.args": [
+        "--rcfile=${workspaceFolder}/.pylintrc"
+    ]
 }

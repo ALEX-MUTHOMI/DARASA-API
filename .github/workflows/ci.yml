@@ -254,8 +254,8 @@ jobs:
           poetry config virtualenvs.in-project true
           poetry install --no-interaction --no-root --with dev
 
-      - name: Pytest Phase 1-safe tests
-        run: poetry run pytest -m "not chaos and not integration and not phase2 and not phase3 and not phase4 and not phase5 and not phase6 and not future"
+      - name: Pytest Phase 2-safe tests
+        run: poetry run pytest -m "not chaos and not phase3 and not phase4 and not phase5 and not phase6 and not future"
 
   docker-build:
     name: Docker-Build
