@@ -1,0 +1,19 @@
+{
+    "include": [
+        "app"
+    ],
+    "exclude": [
+        "**/__pycache__",
+        "**/.pytest_cache",
+        "**/migrations",
+        ".tmpdeps",
+        ".venv"
+    ],
+    "extraPaths": [
+        "app"
+    ],
+    "typeCheckingMode": "basic",
+    "reportMissingImports": "error",
+    "reportMissingModuleSource": "warning",
+    "reportAttributeAccessIssue": "warning"
+}
