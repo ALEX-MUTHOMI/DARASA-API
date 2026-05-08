@@ -255,7 +255,7 @@ jobs:
           poetry install --no-interaction --no-root --with dev
 
       - name: Pytest Phase 3-safe tests
-        run: poetry run pytest --ignore=app/grading/tests -m "not chaos and not integration and not phase4 and not phase5 and not phase6 and not future"
+        run: poetry run pytest --ignore=app/grading/tests -m "not chaos and not integration and not phase5 and not phase6 and not future"
 
   docker-build:
     name: Docker-Build

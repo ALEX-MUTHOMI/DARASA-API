@@ -157,11 +157,11 @@ SHARED_APPS = [
     "tenant",
     "core",
     "academics",
+    "curriculum",
 ]
 
 TENANT_APPS = [
     "django.contrib.contenttypes",
-    "curriculum",
     "disciplinary",
     "portals",
     "bus",
