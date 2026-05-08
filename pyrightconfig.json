@@ -5,7 +5,7 @@
     "exclude": [
         "**/__pycache__",
         "**/.pytest_cache",
-        "**/migrations",
+        "**/migrations/**",
         ".tmpdeps",
         ".venv"
     ],
@@ -13,7 +13,8 @@
         "app"
     ],
     "typeCheckingMode": "basic",
-    "reportMissingImports": "error",
-    "reportMissingModuleSource": "warning",
-    "reportAttributeAccessIssue": "warning"
+    "reportMissingImports": "warning",
+    "reportMissingModuleSource": "information",
+    "reportAttributeAccessIssue": "warning",
+    "reportOptionalMemberAccess": "warning"
 }

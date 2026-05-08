@@ -17,7 +17,16 @@ RESERVED_SCHEMA_NAMES = {
     "pg_toast",
     "extensions",
 }
-RESERVED_SUBDOMAINS = {"admin", "api", "auth", "dashboard", "public", "www"}
+RESERVED_SUBDOMAINS = {
+    "admin",
+    "api",
+    "app",
+    "auth",
+    "dashboard",
+    "public",
+    "sys",
+    "www",
+}
 DOMAIN_LABEL_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
 
 
@@ -146,6 +155,8 @@ class Domain(TimeStampedModel, DomainMixin):
                 or any(not DOMAIN_LABEL_RE.fullmatch(label) for label in labels)
             ):
                 raise ValidationError({"domain": _("Domain is invalid.")})
+            if labels[0] in RESERVED_SUBDOMAINS:
+                raise ValidationError({"domain": _("This domain prefix is reserved.")})
 
     def save(self, *args, **kwargs):
         self.full_clean()

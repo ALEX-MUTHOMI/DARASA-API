@@ -4,6 +4,7 @@ import pathlib
 import uuid
 
 import pytest
+from django.core.exceptions import ValidationError
 
 from core.models import CustomUser, Role, TenantUserRole
 from tenant.models import Domain, School
@@ -106,6 +107,32 @@ def test_invalid_provisioning_input_fails_closed(field, value):
     assert School.objects.count() == 0
     assert Domain.objects.count() == 0
     assert CustomUser.objects.count() == 0
+
+
+@pytest.mark.parametrize(
+    "domain",
+    [
+        "www.darasa.test",
+        "admin.darasa.test",
+        "api.darasa.com",
+        "app.darasa.test",
+        "sys.darasa.test",
+    ],
+)
+def test_domain_model_rejects_reserved_leftmost_labels(domain):
+    with pytest.raises(ValidationError):
+        Domain(domain=domain).clean()
+
+
+@pytest.mark.parametrize("subdomain", ["www", "admin", "api", "app", "sys"])
+def test_school_model_rejects_reserved_subdomains(subdomain):
+    with pytest.raises(ValidationError):
+        School(
+            name="Reserved Prefix School",
+            schema_name=f"sch_{uuid.uuid4().hex[:10]}",
+            subdomain=subdomain,
+            school_code=f"SCH{uuid.uuid4().hex[:9]}".upper(),
+        ).clean()
 
 
 def test_duplicate_subdomain_is_rejected():

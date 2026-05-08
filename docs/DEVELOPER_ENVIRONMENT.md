@@ -37,6 +37,7 @@ Use this when you want VS Code/Pylance/Pylint to resolve Django and dependency
 imports directly on the host:
 
 ```bash
+poetry config virtualenvs.in-project true --local
 poetry install --with dev,security,chaos
 poetry env info --path
 ```
@@ -44,12 +45,15 @@ poetry env info --path
 Then in VS Code:
 
 1. Run `Python: Select Interpreter`.
-2. Select the interpreter from the Poetry environment path.
+2. Select `${workspaceFolder}/.venv` or the interpreter from the Poetry path.
 3. Reload the VS Code window.
 
 If VS Code uses a system Python without project dependencies, Pylance may report
 missing imports for packages such as Django or Cryptography even though Docker
 and CI are healthy.
+
+The committed VS Code settings prefer a repo-local `.venv` so every developer
+gets the same portable interpreter target without machine-specific paths.
 
 ## VS Code Layout
 
@@ -57,11 +61,11 @@ The project uses a nested Django layout:
 
 ```text
 repo-root/
-├── pyproject.toml
-├── docker-compose.yml
-└── app/
-    ├── manage.py
-    └── darasa_project/
+|-- pyproject.toml
+|-- docker-compose.yml
+`-- app/
+    |-- manage.py
+    `-- darasa_project/
 ```
 
 Workspace settings add `app/` to Python analysis paths so imports such as
@@ -73,8 +77,8 @@ Django creates ORM attributes dynamically, including foreign-key convenience
 attributes such as `user_id`, `tenant_id`, and `role_id`. Pylance can warn about
 these because they are not declared as normal Python attributes.
 
-This repository keeps Pylance in basic mode and downgrades dynamic attribute
-diagnostics to warnings. Runtime correctness remains enforced by:
+This repository keeps Pylance in basic mode and keeps dynamic Django attribute
+diagnostics as warnings. Runtime correctness remains enforced by:
 
 - Django system checks
 - migrations
@@ -95,9 +99,11 @@ replace CI security or lint checks.
 
 If Pylance says `Import "django..." could not be resolved`:
 
-1. Confirm VS Code selected the Poetry interpreter, or use Docker-first commands.
-2. Confirm `.vscode/settings.json` includes `app` in `python.analysis.extraPaths`.
-3. Reload the VS Code window.
+1. Run `poetry config virtualenvs.in-project true --local`.
+2. Run `poetry install --with dev,security,chaos`.
+3. Confirm VS Code selected `${workspaceFolder}/.venv`.
+4. Confirm `.vscode/settings.json` includes `app` in `python.analysis.extraPaths`.
+5. Reload the VS Code window.
 
 If Pylint says dependencies cannot be imported, the selected interpreter does
 not have the Poetry dependencies installed.

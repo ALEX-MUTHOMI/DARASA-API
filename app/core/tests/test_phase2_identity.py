@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import uuid
+from typing import cast
 
 import pytest
+from django.core.exceptions import ImproperlyConfigured
 from django.db import IntegrityError, transaction
 
-from core.models import CustomUser, Role, TenantUserRole
+from core.models import CustomUser, EncryptedCharField, Role, TenantUserRole
 from core.policies import PolicyContext, is_allowed
 from core.selectors import (
     get_active_tenant_user_role_bindings,
@@ -36,10 +38,12 @@ def _user(email: str = "actor@example.test") -> CustomUser:
 
 def test_default_roles_are_seeded_with_unique_codes():
     roles = ensure_default_roles()
+    principal = get_principal_role()
 
     assert {role.code for role in roles} == {choice.value for choice in Role.RoleCode}
     assert Role.objects.filter(code=Role.RoleCode.PRINCIPAL).count() == 1
-    assert get_principal_role().code == Role.RoleCode.PRINCIPAL
+    assert principal is not None
+    assert principal.code == Role.RoleCode.PRINCIPAL
 
 
 def test_identity_and_rbac_models_use_uuid_primary_keys():
@@ -57,6 +61,18 @@ def test_identity_and_rbac_models_use_uuid_primary_keys():
     assert isinstance(user.pk, uuid.UUID)
     assert isinstance(role.pk, uuid.UUID)
     assert isinstance(binding.pk, uuid.UUID)
+
+
+def test_create_user_ignores_privilege_mass_assignment():
+    user = CustomUser.objects.create_user(
+        email="mass-assignment@example.test",
+        password="test-only-secret",
+        is_staff=True,
+        is_superuser=True,
+    )
+
+    assert not user.is_staff
+    assert not user.is_superuser
 
 
 def test_tenant_user_role_binding_is_tenant_scoped_and_fail_closed():
@@ -133,6 +149,11 @@ def test_inactive_binding_is_ignored_by_selectors_and_policies():
     assert not is_allowed(context)
 
 
+def test_active_binding_selector_requires_user_or_tenant_scope():
+    with pytest.raises(ValueError):
+        get_active_tenant_user_role_bindings()
+
+
 def test_policy_context_denies_missing_or_unknown_context():
     school = _school("policy")
     user = _user("policy@example.test")
@@ -150,3 +171,57 @@ def test_policy_context_denies_missing_or_unknown_context():
     assert not is_allowed(
         PolicyContext(tenant=school, actor=user, action="unknown", role=role)
     )
+
+
+@pytest.mark.parametrize(
+    "role_code",
+    [
+        Role.RoleCode.GUARDIAN,
+        Role.RoleCode.AUDITOR,
+        Role.RoleCode.SUBJECT_TEACHER,
+    ],
+)
+def test_tenant_admin_policy_denies_non_admin_roles(role_code):
+    school = _school("deny")
+    user = _user(f"{role_code.value}@example.test")
+    role = Role.objects.create(code=role_code, name=role_code.label)
+    TenantUserRole.objects.create(tenant=school, user=user, role=role)
+
+    assert not is_allowed(
+        PolicyContext(
+            tenant=school,
+            actor=user,
+            action="tenant.admin",
+            role=role,
+        )
+    )
+
+
+@pytest.mark.parametrize(
+    "role_code",
+    [
+        Role.RoleCode.PRINCIPAL,
+        Role.RoleCode.SCHOOL_ADMIN,
+    ],
+)
+def test_tenant_admin_policy_allows_explicit_admin_roles(role_code):
+    school = _school("allow")
+    user = _user(f"{role_code.value}@example.test")
+    role = Role.objects.create(code=role_code, name=role_code.label)
+    TenantUserRole.objects.create(tenant=school, user=user, role=role)
+
+    assert is_allowed(
+        PolicyContext(
+            tenant=school,
+            actor=user,
+            action="tenant.admin",
+            role=role,
+        )
+    )
+
+
+def test_encrypted_char_field_fails_closed_on_invalid_ciphertext():
+    field = cast(EncryptedCharField, EncryptedCharField())
+
+    with pytest.raises(ImproperlyConfigured):
+        field.from_db_value("not-valid-ciphertext", None, None)

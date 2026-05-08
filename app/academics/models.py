@@ -206,7 +206,8 @@ class TeacherAssignment(TimeStampedModel):
         ]
 
     def __str__(self):
+        teacher_id = getattr(self, "teacher_id", None)
         return (
-            f"Teacher {self.teacher_id} -> {self.subject.name} "
+            f"Teacher {teacher_id} -> {self.subject.name} "
             f"in {self.cohort.name}"
         )

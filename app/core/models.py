@@ -3,9 +3,10 @@ from __future__ import annotations
 import uuid
 from typing import Any, ClassVar, cast
 
-from cryptography.fernet import Fernet
+from cryptography.fernet import Fernet, InvalidToken
 from django.conf import settings
 from django.contrib.auth.models import AbstractUser, BaseUserManager
+from django.core.exceptions import ImproperlyConfigured
 from django.db import models
 from django.db.models import Q
 from django.utils import timezone
@@ -38,8 +39,10 @@ class EncryptedCharField(models.CharField):
             return value
         try:
             return self._fernet().decrypt(value.encode("utf-8")).decode("utf-8")
-        except (ValueError, TypeError):
-            return value
+        except (InvalidToken, ValueError, TypeError) as exc:
+            raise ImproperlyConfigured(
+                "Encrypted field value could not be decrypted."
+            ) from exc
 
 
 class CustomUserManager(BaseUserManager):
@@ -65,8 +68,8 @@ class CustomUserManager(BaseUserManager):
         password: str | None = None,
         **extra_fields: Any,
     ) -> CustomUser:
-        extra_fields.setdefault("is_staff", False)
-        extra_fields.setdefault("is_superuser", False)
+        extra_fields["is_staff"] = False
+        extra_fields["is_superuser"] = False
         return self._create_user(email, password, **extra_fields)
 
     def create_superuser(
@@ -192,4 +195,7 @@ class TenantUserRole(TimeStampedModel):
         ]
 
     def __str__(self) -> str:
-        return f"{self.user_id}:{self.tenant_id}:{self.role_id}"
+        user_id = getattr(self, "user_id", None)
+        tenant_id = getattr(self, "tenant_id", None)
+        role_id = getattr(self, "role_id", None)
+        return f"{user_id}:{tenant_id}:{role_id}"

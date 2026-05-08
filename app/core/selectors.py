@@ -11,6 +11,9 @@ def get_active_tenant_user_role_bindings(
     user: CustomUser | None = None,
     tenant: School | None = None,
 ) -> QuerySet[TenantUserRole]:
+    if user is None and tenant is None:
+        raise ValueError("Either user or tenant is required.")
+
     queryset = TenantUserRole.objects.filter(
         is_active=True,
         role__is_active=True,

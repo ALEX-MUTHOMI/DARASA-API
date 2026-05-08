@@ -11,6 +11,18 @@ from core.selectors import user_has_role_in_tenant
 from tenant.models import School
 
 
+TENANT_ADMIN_ALLOWED_ROLES = frozenset(
+    {
+        Role.RoleCode.PRINCIPAL.value,
+        Role.RoleCode.SCHOOL_ADMIN.value,
+    }
+)
+
+ACTION_ALLOWED_ROLES = {
+    "tenant.admin": TENANT_ADMIN_ALLOWED_ROLES,
+}
+
+
 @dataclass(frozen=True)
 class PolicyContext:
     tenant: School | None
@@ -31,8 +43,13 @@ def is_allowed(context: PolicyContext) -> bool:
         return False
     if not context.action:
         return False
-    if context.action not in {"tenant.admin"}:
+
+    allowed_roles = ACTION_ALLOWED_ROLES.get(context.action)
+    if allowed_roles is None:
         return False
+    if context.role.code not in allowed_roles:
+        return False
+
     return user_has_role_in_tenant(
         user=context.actor,
         tenant=context.tenant,
