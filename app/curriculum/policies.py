@@ -108,3 +108,53 @@ def can_view_rubric_foundation(
         context.action == "curriculum.view_rubric_foundation"
         and _can_view_learning_area(context, curriculum_learning_area)
     )
+
+
+def can_view_source_registry(context: PolicyContext) -> bool:
+    return (
+        context.action == "curriculum.cct.register_source"
+        and _context_is_valid(context)
+        and context.role.code in CURRICULUM_VIEW_ROLES
+    )
+
+
+def can_register_curriculum_source(context: PolicyContext) -> bool:
+    return (
+        context.action == "curriculum.cct.register_source"
+        and _is_manager(context)
+    )
+
+
+def can_approve_curriculum_source(context: PolicyContext) -> bool:
+    return (
+        context.action == "curriculum.cct.approve_source"
+        and _is_manager(context)
+    )
+
+
+def can_approve_change_set(context: PolicyContext) -> bool:
+    return (
+        context.action == "curriculum.cct.approve_change_set"
+        and _is_manager(context)
+    )
+
+
+def can_reject_change_set(context: PolicyContext) -> bool:
+    return (
+        context.action == "curriculum.cct.reject_change_set"
+        and _is_manager(context)
+    )
+
+
+def can_publish_curriculum_version(context: PolicyContext) -> bool:
+    return (
+        context.action == "curriculum.cct.publish_version"
+        and _is_manager(context)
+    )
+
+
+def can_supersede_curriculum_version(context: PolicyContext) -> bool:
+    return (
+        context.action == "curriculum.cct.supersede_version"
+        and _is_manager(context)
+    )

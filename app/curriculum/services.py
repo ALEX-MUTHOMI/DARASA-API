@@ -2,14 +2,22 @@ from __future__ import annotations
 
 from typing import Any
 
+from django.core.exceptions import ValidationError
 from django.db import transaction
+from django.utils import timezone
 
 from academics.models import GradeLevel, LearningArea
+from curriculum.algorithms.authority_normalizer import normalize_authority_code
+from curriculum.algorithms.checksum import compute_sha256
+from curriculum.algorithms.publication_state_machine import validate_transition
 from curriculum.models import (
     AssessmentRubricFoundation,
     CoreCompetency,
+    CurriculumAuthority,
+    CurriculumChangeSet,
     CurriculumGradeMapping,
     CurriculumLearningArea,
+    CurriculumPublication,
     CurriculumSourceDocument,
     CurriculumStage,
     CurriculumValue,
@@ -18,6 +26,7 @@ from curriculum.models import (
     OutcomePCILink,
     OutcomeValueLink,
     PertinentContemporaryIssue,
+    SourceArtifact,
     SpecificLearningOutcome,
     Strand,
     SubStrand,
@@ -28,6 +37,215 @@ def _save_clean(instance: Any) -> Any:
     instance.full_clean()
     instance.save()
     return instance
+
+
+@transaction.atomic
+def register_curriculum_authority(
+    *,
+    code: str,
+    name: str,
+    official_website: str,
+    allowed_domains: list[str],
+    is_active: bool = True,
+    is_approved: bool = True,
+) -> CurriculumAuthority:
+    return _save_clean(
+        CurriculumAuthority(
+            code=normalize_authority_code(code),
+            name=name,
+            official_website=official_website,
+            allowed_domains=allowed_domains,
+            is_active=is_active,
+            is_approved=is_approved,
+        )
+    )
+
+
+@transaction.atomic
+def register_source_document(
+    *,
+    authority: CurriculumAuthority,
+    title: str,
+    document_code: str,
+    document_version_label: str,
+    source_url: str,
+    checksum: str,
+) -> CurriculumSourceDocument:
+    if not authority.is_active or not authority.is_approved:
+        raise ValidationError({"authority": "Source authority is not approved."})
+    return _save_clean(
+        CurriculumSourceDocument(
+            authority=authority,
+            source_authority=authority.code,
+            title=title,
+            document_code=document_code,
+            document_version_label=document_version_label,
+            source_url=source_url,
+            checksum=checksum,
+        )
+    )
+
+
+def compute_source_checksum(content: bytes) -> str:
+    return compute_sha256(content)
+
+
+@transaction.atomic
+def register_source_artifact(
+    *,
+    source_document: CurriculumSourceDocument,
+    file_name: str,
+    content_type: str,
+    file_size: int,
+    content: bytes,
+    capture_method: str,
+) -> SourceArtifact:
+    checksum = compute_source_checksum(content)
+    return _save_clean(
+        SourceArtifact(
+            source_document=source_document,
+            file_name=file_name,
+            content_type=content_type,
+            file_size=file_size,
+            checksum_algorithm="sha256",
+            checksum=checksum,
+            capture_method=capture_method,
+        )
+    )
+
+
+@transaction.atomic
+def create_curriculum_change_set(
+    *,
+    source_document: CurriculumSourceDocument,
+    change_type: str,
+    summary: str,
+    old_curriculum_version: CurriculumVersion | None = None,
+    proposed_curriculum_version: CurriculumVersion | None = None,
+    status: str | None = None,
+) -> CurriculumChangeSet:
+    _ = status
+    return _save_clean(
+        CurriculumChangeSet(
+            source_document=source_document,
+            old_curriculum_version=old_curriculum_version,
+            proposed_curriculum_version=proposed_curriculum_version,
+            change_type=change_type,
+            summary=summary,
+            status=CurriculumChangeSet.Status.DETECTED,
+        )
+    )
+
+
+def _move_change_set_to_review(change_set: CurriculumChangeSet) -> None:
+    if change_set.status == CurriculumChangeSet.Status.DETECTED:
+        validate_transition(
+            CurriculumChangeSet.Status.DETECTED,
+            CurriculumChangeSet.Status.QUARANTINED,
+        )
+        change_set.status = CurriculumChangeSet.Status.QUARANTINED
+    if change_set.status == CurriculumChangeSet.Status.QUARANTINED:
+        validate_transition(
+            CurriculumChangeSet.Status.QUARANTINED,
+            CurriculumChangeSet.Status.UNDER_REVIEW,
+        )
+        change_set.status = CurriculumChangeSet.Status.UNDER_REVIEW
+
+
+@transaction.atomic
+def approve_change_set(
+    *,
+    change_set: CurriculumChangeSet,
+    reviewed_by: Any,
+) -> CurriculumChangeSet:
+    _move_change_set_to_review(change_set)
+    validate_transition(
+        change_set.status,
+        CurriculumChangeSet.Status.APPROVED,
+    )
+    change_set.status = CurriculumChangeSet.Status.APPROVED
+    change_set.reviewed_by = reviewed_by
+    change_set.reviewed_at = timezone.now()
+    return _save_clean(change_set)
+
+
+@transaction.atomic
+def reject_change_set(
+    *,
+    change_set: CurriculumChangeSet,
+    reviewed_by: Any,
+) -> CurriculumChangeSet:
+    if change_set.status not in {
+        CurriculumChangeSet.Status.DETECTED,
+        CurriculumChangeSet.Status.QUARANTINED,
+        CurriculumChangeSet.Status.UNDER_REVIEW,
+        CurriculumChangeSet.Status.APPROVED,
+    }:
+        validate_transition(change_set.status, CurriculumChangeSet.Status.REJECTED)
+    change_set.status = CurriculumChangeSet.Status.REJECTED
+    change_set.reviewed_by = reviewed_by
+    change_set.reviewed_at = timezone.now()
+    return _save_clean(change_set)
+
+
+@transaction.atomic
+def create_curriculum_publication(
+    *,
+    curriculum_version: CurriculumVersion,
+    effective_from: str,
+    publication_notes: str,
+    approved_by: Any | None = None,
+    effective_to: str | None = None,
+    is_active: bool = True,
+) -> CurriculumPublication:
+    return _save_clean(
+        CurriculumPublication(
+            curriculum_version=curriculum_version,
+            effective_from=effective_from,
+            effective_to=effective_to,
+            is_active=is_active,
+            publication_notes=publication_notes,
+            approved_by=approved_by,
+        )
+    )
+
+
+@transaction.atomic
+def publish_curriculum_version(
+    *,
+    change_set: CurriculumChangeSet,
+    curriculum_version: CurriculumVersion | None,
+    approved_by: Any,
+    effective_from: str,
+    publication_notes: str = "Reviewed curriculum publication.",
+) -> CurriculumPublication:
+    if curriculum_version is None:
+        raise ValidationError(
+            {"curriculum_version": "Approved curriculum version is required."}
+        )
+    validate_transition(change_set.status, CurriculumChangeSet.Status.PUBLISHED)
+    publication = create_curriculum_publication(
+        curriculum_version=curriculum_version,
+        approved_by=approved_by,
+        effective_from=effective_from,
+        publication_notes=publication_notes,
+    )
+    change_set.status = CurriculumChangeSet.Status.PUBLISHED
+    change_set.reviewed_by = approved_by
+    change_set.reviewed_at = timezone.now()
+    _save_clean(change_set)
+    return publication
+
+
+@transaction.atomic
+def supersede_curriculum_publication(
+    *,
+    publication: CurriculumPublication,
+    superseded_by: CurriculumPublication,
+) -> CurriculumPublication:
+    publication.is_active = False
+    publication.superseded_by = superseded_by
+    return _save_clean(publication)
 
 
 @transaction.atomic

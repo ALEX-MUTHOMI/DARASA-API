@@ -3,6 +3,7 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
+from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.core.validators import RegexValidator
 from django.db import models
@@ -10,6 +11,10 @@ from django.db.models import Q
 from django.utils.translation import gettext_lazy as _
 
 from academics.models import GradeLevel, LearningArea
+from curriculum.algorithms.artifact_validator import validate_artifact_metadata
+from curriculum.algorithms.authority_normalizer import normalize_authority_code
+from curriculum.algorithms.pii_guard import validate_governance_text
+from curriculum.algorithms.source_url_validator import validate_source_url
 from tenant.models import TimeStampedModel
 
 
@@ -35,9 +40,15 @@ class CurriculumSourceDocument(TimeStampedModel):
         PROJECT_OFFICIAL = "project_official", _("Project-provided official source")
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    authority = models.ForeignKey(
+        "CurriculumAuthority",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="source_documents",
+    )
     source_authority = models.SlugField(
         max_length=64,
-        choices=SourceAuthority.choices,
     )
     title = models.CharField(max_length=255)
     document_code = models.CharField(max_length=128)
@@ -75,6 +86,20 @@ class CurriculumSourceDocument(TimeStampedModel):
         self.document_version_label = self.document_version_label.strip()
         if self.checksum:
             self.checksum = self.checksum.strip()
+        if self.authority_id:
+            if not self.authority.is_active or not self.authority.is_approved:
+                raise ValidationError(
+                    {"authority": _("Authority is not approved for source use.")}
+                )
+            self.source_authority = self.authority.code
+            self.source_url = validate_source_url(
+                self.source_url,
+                allowed_domains=self.authority.allowed_domains,
+            )
+        elif self.source_authority not in self.SourceAuthority.values:
+            raise ValidationError(
+                {"source_authority": _("Source authority is not approved.")}
+            )
 
     def save(self, *args: Any, **kwargs: Any) -> Any:
         self.full_clean()
@@ -638,3 +663,282 @@ class AssessmentRubricFoundation(TimeStampedModel):
     def save(self, *args: Any, **kwargs: Any) -> Any:
         self.full_clean()
         return super().save(*args, **kwargs)
+
+
+class CurriculumAuthority(TimeStampedModel):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    code = models.SlugField(max_length=64, unique=True, validators=[code_validator])
+    name = models.CharField(max_length=255)
+    official_website = models.URLField(max_length=500)
+    allowed_domains = models.JSONField(default=list)
+    is_active = models.BooleanField(default=True, db_index=True)
+    is_approved = models.BooleanField(default=True, db_index=True)
+
+    class Meta(TimeStampedModel.Meta):
+        verbose_name = _("Curriculum authority")
+        verbose_name_plural = _("Curriculum authorities")
+        indexes = [
+            models.Index(
+                fields=["code", "is_active", "is_approved"],
+                name="curr_authority_lookup_idx",
+            ),
+        ]
+
+    def clean(self) -> None:
+        super().clean()
+        self.code = normalize_authority_code(self.code)
+        _require_text(self.name, "name")
+        self.name = self.name.strip()
+        if not isinstance(self.allowed_domains, list) or not self.allowed_domains:
+            raise ValidationError(
+                {"allowed_domains": _("Allowed domains are required.")}
+            )
+        self.allowed_domains = [
+            domain.strip().lower().rstrip(".")
+            for domain in self.allowed_domains
+            if isinstance(domain, str) and domain.strip()
+        ]
+        if not self.allowed_domains:
+            raise ValidationError(
+                {"allowed_domains": _("Allowed domains are required.")}
+            )
+        self.official_website = validate_source_url(
+            self.official_website,
+            allowed_domains=self.allowed_domains,
+        )
+
+    def save(self, *args: Any, **kwargs: Any) -> Any:
+        self.full_clean()
+        return super().save(*args, **kwargs)
+
+    def __str__(self) -> str:
+        return self.code
+
+
+class SourceArtifact(TimeStampedModel):
+    class CaptureMethod(models.TextChoices):
+        MANUAL_UPLOAD = "manual_upload", _("Manual upload")
+        APPROVED_REFERENCE = "approved_reference", _("Approved reference")
+
+    class QuarantineStatus(models.TextChoices):
+        QUARANTINED = "quarantined", _("Quarantined")
+        TRUSTED = "trusted", _("Trusted")
+        REJECTED = "rejected", _("Rejected")
+
+    class ScanStatus(models.TextChoices):
+        PENDING = "pending", _("Pending")
+        CLEAN = "clean", _("Clean")
+        REJECTED = "rejected", _("Rejected")
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    source_document = models.ForeignKey(
+        CurriculumSourceDocument,
+        on_delete=models.PROTECT,
+        related_name="artifacts",
+    )
+    file_name = models.CharField(max_length=255)
+    content_type = models.CharField(max_length=128)
+    file_size = models.PositiveIntegerField()
+    checksum_algorithm = models.CharField(max_length=32, default="sha256")
+    checksum = models.CharField(max_length=96)
+    capture_method = models.CharField(
+        max_length=32,
+        choices=CaptureMethod.choices,
+    )
+    quarantine_status = models.CharField(
+        max_length=32,
+        choices=QuarantineStatus.choices,
+        default=QuarantineStatus.QUARANTINED,
+        db_index=True,
+    )
+    scan_status = models.CharField(
+        max_length=32,
+        choices=ScanStatus.choices,
+        default=ScanStatus.PENDING,
+        db_index=True,
+    )
+    captured_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta(TimeStampedModel.Meta):
+        verbose_name = _("Source artifact")
+        verbose_name_plural = _("Source artifacts")
+        constraints = [
+            models.UniqueConstraint(
+                fields=["source_document", "checksum"],
+                name="curr_artifact_source_checksum_unique",
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=["quarantine_status", "scan_status"],
+                name="curr_artifact_quarantine_idx",
+            ),
+        ]
+
+    def clean(self) -> None:
+        super().clean()
+        _require_text(self.file_name, "file_name")
+        self.file_name = self.file_name.strip()
+        self.content_type = self.content_type.strip().lower()
+        self.checksum_algorithm = self.checksum_algorithm.strip().lower()
+        self.checksum = self.checksum.strip().lower()
+        if self.checksum_algorithm != "sha256":
+            raise ValidationError(
+                {"checksum_algorithm": _("Only SHA-256 checksums are supported.")}
+            )
+        validate_artifact_metadata(
+            file_size=self.file_size,
+            content_type=self.content_type,
+            checksum=self.checksum,
+        )
+        if (
+            self.quarantine_status == self.QuarantineStatus.TRUSTED
+            and self.scan_status != self.ScanStatus.CLEAN
+        ):
+            raise ValidationError(
+                {"quarantine_status": _("Trusted artifacts must be scan-clean.")}
+            )
+
+    def save(self, *args: Any, **kwargs: Any) -> Any:
+        self.full_clean()
+        return super().save(*args, **kwargs)
+
+    def __str__(self) -> str:
+        return f"SourceArtifact {self.pk}"
+
+
+class CurriculumChangeSet(TimeStampedModel):
+    class ChangeType(models.TextChoices):
+        NEW_VERSION = "new_version", _("New version")
+        SOURCE_CHANGED = "source_changed", _("Source changed")
+        CORRECTION = "correction", _("Correction")
+
+    class Status(models.TextChoices):
+        DETECTED = "detected", _("Detected")
+        QUARANTINED = "quarantined", _("Quarantined")
+        UNDER_REVIEW = "under_review", _("Under review")
+        APPROVED = "approved", _("Approved")
+        REJECTED = "rejected", _("Rejected")
+        PUBLISHED = "published", _("Published")
+        SUPERSEDED = "superseded", _("Superseded")
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    source_document = models.ForeignKey(
+        CurriculumSourceDocument,
+        on_delete=models.PROTECT,
+        related_name="change_sets",
+    )
+    old_curriculum_version = models.ForeignKey(
+        CurriculumVersion,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="old_change_sets",
+    )
+    proposed_curriculum_version = models.ForeignKey(
+        CurriculumVersion,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="proposed_change_sets",
+    )
+    change_type = models.CharField(max_length=32, choices=ChangeType.choices)
+    summary = models.TextField()
+    status = models.CharField(
+        max_length=32,
+        choices=Status.choices,
+        default=Status.DETECTED,
+        db_index=True,
+    )
+    detected_at = models.DateTimeField(auto_now_add=True)
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    reviewed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="reviewed_curriculum_change_sets",
+    )
+
+    class Meta(TimeStampedModel.Meta):
+        verbose_name = _("Curriculum change set")
+        verbose_name_plural = _("Curriculum change sets")
+        indexes = [
+            models.Index(
+                fields=["status", "detected_at"],
+                name="curr_change_status_idx",
+            ),
+        ]
+
+    def clean(self) -> None:
+        super().clean()
+        validate_governance_text(self.summary)
+        self.summary = self.summary.strip()
+
+    def save(self, *args: Any, **kwargs: Any) -> Any:
+        self.full_clean()
+        return super().save(*args, **kwargs)
+
+    def __str__(self) -> str:
+        return f"CurriculumChangeSet {self.pk}"
+
+
+class CurriculumPublication(TimeStampedModel):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    curriculum_version = models.ForeignKey(
+        CurriculumVersion,
+        on_delete=models.PROTECT,
+        related_name="publications",
+    )
+    effective_from = models.DateField()
+    effective_to = models.DateField(null=True, blank=True)
+    is_active = models.BooleanField(default=True, db_index=True)
+    publication_notes = models.TextField()
+    approved_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="approved_curriculum_publications",
+    )
+    published_at = models.DateTimeField(auto_now_add=True)
+    superseded_by = models.ForeignKey(
+        "self",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="superseded_publications",
+    )
+
+    class Meta(TimeStampedModel.Meta):
+        verbose_name = _("Curriculum publication")
+        verbose_name_plural = _("Curriculum publications")
+        constraints = [
+            models.UniqueConstraint(
+                fields=["curriculum_version"],
+                condition=Q(is_active=True),
+                name="curriculum_one_active_publication_per_version",
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=["is_active", "effective_from"],
+                name="curr_publication_active_idx",
+            ),
+        ]
+
+    def clean(self) -> None:
+        super().clean()
+        validate_governance_text(self.publication_notes)
+        self.publication_notes = self.publication_notes.strip()
+        if self.effective_to and self.effective_to < self.effective_from:
+            raise ValidationError(
+                {"effective_to": _("Publication end date must follow start date.")}
+            )
+
+    def save(self, *args: Any, **kwargs: Any) -> Any:
+        self.full_clean()
+        return super().save(*args, **kwargs)
+
+    def __str__(self) -> str:
+        return f"CurriculumPublication {self.pk}"
