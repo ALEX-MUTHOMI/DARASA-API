@@ -11,17 +11,25 @@ from curriculum.models import (
     CoreCompetency,
     CurriculumAuthority,
     CurriculumChangeSet,
+    CurriculumDiff,
+    CurriculumDiffItem,
+    CurriculumImpact,
     CurriculumLearningArea,
     CurriculumPublication,
     CurriculumSourceDocument,
     CurriculumVersion,
     CurriculumValue,
     PertinentContemporaryIssue,
+    PrincipalNotificationEvidenceCard,
+    RegulatoryNotice,
+    SchoolUpdateAcknowledgement,
     SourceArtifact,
     SpecificLearningOutcome,
     Strand,
     SubStrand,
+    TeacherReadinessRequirement,
 )
+from tenant.models import School
 
 
 def get_active_curriculum_version() -> CurriculumVersion | None:
@@ -207,3 +215,112 @@ def resolve_curriculum_version_for_date(
     if publication is None:
         return None
     return publication.curriculum_version
+
+
+def get_curriculum_diffs() -> QuerySet[CurriculumDiff]:
+    return CurriculumDiff.objects.exclude(
+        diff_status=CurriculumDiff.Status.REJECTED,
+    ).select_related(
+        "old_curriculum_version",
+        "new_curriculum_version",
+        "source_change_set",
+    ).order_by("-created_at")
+
+
+def get_diff_items_for_review() -> QuerySet[CurriculumDiffItem]:
+    return CurriculumDiffItem.objects.filter(
+        requires_review=True,
+        curriculum_diff__diff_status__in=[
+            CurriculumDiff.Status.DRAFT,
+            CurriculumDiff.Status.UNDER_REVIEW,
+        ],
+    ).select_related("curriculum_diff").order_by(
+        "severity",
+        "entity_type",
+        "entity_identifier",
+    )
+
+
+def get_impacts_for_senior_school() -> QuerySet[CurriculumImpact]:
+    return CurriculumImpact.objects.filter(
+        impact_category=CurriculumImpact.Category.SENIOR_SCHOOL_CURRICULUM,
+    ).select_related(
+        "diff_item",
+        "affected_grade_level",
+        "affected_learning_area",
+    ).order_by("-created_at")
+
+
+def get_impacts_for_junior_to_senior_transition() -> QuerySet[CurriculumImpact]:
+    return CurriculumImpact.objects.filter(
+        impact_category=CurriculumImpact.Category.JUNIOR_TO_SENIOR_TRANSITION,
+    ).select_related("diff_item", "affected_grade_level").order_by("-created_at")
+
+
+def get_regulatory_notices_for_review() -> QuerySet[RegulatoryNotice]:
+    return RegulatoryNotice.objects.filter(
+        review_status=RegulatoryNotice.ReviewStatus.PENDING_REVIEW,
+    ).select_related("authority", "source_document", "source_artifact").order_by(
+        "created_at"
+    )
+
+
+def get_verified_regulatory_notices() -> QuerySet[RegulatoryNotice]:
+    return RegulatoryNotice.objects.filter(
+        review_status=RegulatoryNotice.ReviewStatus.VERIFIED,
+        notice_status__in=[
+            RegulatoryNotice.NoticeStatus.DRAFT,
+            RegulatoryNotice.NoticeStatus.ACTIVE,
+        ],
+    ).select_related("authority", "source_document", "source_artifact").order_by(
+        "-effective_date",
+        "-created_at",
+    )
+
+
+def get_teacher_readiness_requirements() -> QuerySet[TeacherReadinessRequirement]:
+    return TeacherReadinessRequirement.objects.filter(
+        is_active=True,
+        regulatory_notice__review_status=RegulatoryNotice.ReviewStatus.VERIFIED,
+    ).select_related(
+        "regulatory_notice",
+        "affected_learning_area",
+        "affected_grade_level",
+    ).order_by("-effective_from", "requirement_type")
+
+
+def get_pending_principal_notifications(
+    *,
+    tenant: School | None = None,
+) -> QuerySet[PrincipalNotificationEvidenceCard]:
+    queryset = PrincipalNotificationEvidenceCard.objects.filter(
+        status=PrincipalNotificationEvidenceCard.Status.READY_FOR_REVIEW,
+    ).select_related("tenant", "regulatory_notice", "curriculum_diff")
+    if tenant is not None:
+        queryset = queryset.filter(tenant=tenant)
+    return queryset.order_by("-created_at")
+
+
+def get_issued_principal_notifications_for_school(
+    *,
+    tenant: School,
+) -> QuerySet[PrincipalNotificationEvidenceCard]:
+    return PrincipalNotificationEvidenceCard.objects.filter(
+        tenant=tenant,
+        status__in=[
+            PrincipalNotificationEvidenceCard.Status.ISSUED,
+            PrincipalNotificationEvidenceCard.Status.ACKNOWLEDGED,
+        ],
+    ).select_related("regulatory_notice", "curriculum_diff").order_by("-created_at")
+
+
+def get_acknowledgements_for_school(
+    *,
+    tenant: School,
+) -> QuerySet[SchoolUpdateAcknowledgement]:
+    return SchoolUpdateAcknowledgement.objects.filter(
+        tenant=tenant,
+    ).select_related(
+        "notification_evidence_card",
+        "acknowledged_by",
+    ).order_by("-acknowledged_at")

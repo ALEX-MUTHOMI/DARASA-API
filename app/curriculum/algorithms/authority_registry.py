@@ -8,6 +8,7 @@ APPROVED_AUTHORITY_DOMAINS = {
     "knec": frozenset({"knec.ac.ke", "www.knec.ac.ke"}),
     "moe": frozenset({"education.go.ke", "www.education.go.ke"}),
     "ministry-of-education": frozenset({"education.go.ke", "www.education.go.ke"}),
+    "tsc": frozenset({"tsc.go.ke", "www.tsc.go.ke"}),
 }
 
 

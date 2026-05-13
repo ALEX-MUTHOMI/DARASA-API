@@ -7,15 +7,31 @@ from django.db import transaction
 from django.utils import timezone
 
 from academics.models import GradeLevel, LearningArea
+from curriculum.algorithms.curriculum_impact_analyzer import analyze_diff_item_impact
 from curriculum.algorithms.authority_normalizer import normalize_authority_code
 from curriculum.algorithms.checksum import compute_sha256
+from curriculum.algorithms.principal_notification_builder import (
+    build_notification_payload,
+)
 from curriculum.algorithms.publication_state_machine import validate_transition
+from curriculum.algorithms.regulatory_notice_classifier import (
+    classify_regulatory_notice as classify_notice_algorithm,
+)
+from curriculum.algorithms.senior_school_dependency_mapper import (
+    map_junior_to_senior_signals,
+)
+from curriculum.algorithms.teacher_readiness_mapper import (
+    map_teacher_readiness_requirement as map_teacher_requirement_algorithm,
+)
 from curriculum.models import (
     AssessmentRubricFoundation,
     CoreCompetency,
     CurriculumAuthority,
     CurriculumChangeSet,
+    CurriculumDiff,
+    CurriculumDiffItem,
     CurriculumGradeMapping,
+    CurriculumImpact,
     CurriculumLearningArea,
     CurriculumPublication,
     CurriculumSourceDocument,
@@ -26,10 +42,15 @@ from curriculum.models import (
     OutcomePCILink,
     OutcomeValueLink,
     PertinentContemporaryIssue,
+    PrincipalNotificationEvidenceCard,
+    RegulatoryImpact,
+    RegulatoryNotice,
+    SchoolUpdateAcknowledgement,
     SourceArtifact,
     SpecificLearningOutcome,
     Strand,
     SubStrand,
+    TeacherReadinessRequirement,
 )
 
 
@@ -474,3 +495,336 @@ def create_rubric_foundation_descriptor(
             is_active=is_active,
         )
     )
+
+
+@transaction.atomic
+def create_curriculum_diff(
+    *,
+    old_curriculum_version: CurriculumVersion,
+    new_curriculum_version: CurriculumVersion,
+    summary: str,
+    source_change_set: CurriculumChangeSet | None = None,
+    diff_status: str = CurriculumDiff.Status.DRAFT,
+) -> CurriculumDiff:
+    return _save_clean(
+        CurriculumDiff(
+            old_curriculum_version=old_curriculum_version,
+            new_curriculum_version=new_curriculum_version,
+            source_change_set=source_change_set,
+            diff_status=diff_status,
+            summary=summary,
+        )
+    )
+
+
+@transaction.atomic
+def create_curriculum_diff_items(
+    *,
+    curriculum_diff: CurriculumDiff,
+    items: list[dict[str, Any]],
+) -> list[CurriculumDiffItem]:
+    created: list[CurriculumDiffItem] = []
+    for item in items:
+        created.append(
+            _save_clean(
+                CurriculumDiffItem(
+                    curriculum_diff=curriculum_diff,
+                    change_type=item["change_type"],
+                    entity_type=item["entity_type"],
+                    entity_identifier=item["entity_identifier"],
+                    old_value_fingerprint=item.get("old_value_fingerprint", ""),
+                    new_value_fingerprint=item.get("new_value_fingerprint", ""),
+                    summary=item["summary"],
+                    severity=item.get("severity", CurriculumDiffItem.Severity.MEDIUM),
+                    requires_review=item.get("requires_review", True),
+                )
+            )
+        )
+    return created
+
+
+@transaction.atomic
+def analyze_curriculum_impact(
+    *,
+    diff_item: CurriculumDiffItem,
+    affected_stage: str,
+    affected_grade_level: GradeLevel | None = None,
+    affected_learning_area: CurriculumLearningArea | None = None,
+) -> list[CurriculumImpact]:
+    proposals = analyze_diff_item_impact(
+        {
+            "change_type": diff_item.change_type,
+            "entity_type": diff_item.entity_type,
+            "entity_identifier": diff_item.entity_identifier,
+            "summary": diff_item.summary,
+            "affected_stage": affected_stage,
+            "affected_grade_level": getattr(affected_grade_level, "name", ""),
+            "affected_learning_area": getattr(
+                affected_learning_area,
+                "official_name",
+                "",
+            ),
+        }
+    )
+    impacts: list[CurriculumImpact] = []
+    for proposal in proposals:
+        impacts.append(
+            _save_clean(
+                CurriculumImpact(
+                    curriculum_diff=diff_item.curriculum_diff,
+                    diff_item=diff_item,
+                    affected_stage=affected_stage,
+                    affected_grade_level=affected_grade_level,
+                    affected_learning_area=affected_learning_area,
+                    impact_category=proposal["impact_category"],
+                    impact_severity=proposal["impact_severity"],
+                    action_required=proposal["action_required"],
+                )
+            )
+        )
+    return impacts
+
+
+@transaction.atomic
+def register_regulatory_notice(
+    *,
+    authority: CurriculumAuthority,
+    title: str,
+    summary: str,
+    notice_type: str | None = None,
+    source_document: CurriculumSourceDocument | None = None,
+    source_artifact: SourceArtifact | None = None,
+    reference_number: str = "",
+    publication_date: str | None = None,
+    effective_date: str | None = None,
+    review_status: str = RegulatoryNotice.ReviewStatus.PENDING_REVIEW,
+    reviewed_by: Any | None = None,
+    status: str | None = None,
+) -> RegulatoryNotice:
+    _ = status
+    if review_status == RegulatoryNotice.ReviewStatus.VERIFIED:
+        _require_active_reviewer(reviewed_by)
+    classified_type = notice_type or classify_notice_algorithm(
+        authority_code=authority.code,
+        title=title,
+        summary=summary,
+    )
+    transition_signals = map_junior_to_senior_signals(title=title, summary=summary)
+    affects_senior = any(
+        signal in f"{title} {summary}".lower()
+        for signal in ["senior school", "grade 10", "grade 11", "grade 12"]
+    )
+    notice = RegulatoryNotice(
+        authority=authority,
+        source_document=source_document,
+        source_artifact=source_artifact,
+        notice_type=classified_type,
+        title=title,
+        reference_number=reference_number,
+        publication_date=publication_date,
+        effective_date=effective_date,
+        summary=summary,
+        review_status=review_status,
+        notice_status=RegulatoryNotice.NoticeStatus.DRAFT,
+        affects_senior_school=affects_senior or bool(transition_signals),
+        affects_junior_to_senior_transition=bool(transition_signals),
+        reviewed_at=timezone.now()
+        if review_status == RegulatoryNotice.ReviewStatus.VERIFIED
+        else None,
+        reviewed_by=reviewed_by
+        if review_status == RegulatoryNotice.ReviewStatus.VERIFIED
+        else None,
+    )
+    return _save_clean(notice)
+
+
+@transaction.atomic
+def classify_regulatory_notice(
+    *,
+    regulatory_notice: RegulatoryNotice,
+) -> RegulatoryNotice:
+    regulatory_notice.notice_type = classify_notice_algorithm(
+        authority_code=regulatory_notice.authority.code,
+        title=regulatory_notice.title,
+        summary=regulatory_notice.summary,
+    )
+    regulatory_notice.affects_junior_to_senior_transition = bool(
+        map_junior_to_senior_signals(
+            title=regulatory_notice.title,
+            summary=regulatory_notice.summary,
+        )
+    )
+    if regulatory_notice.affects_junior_to_senior_transition:
+        regulatory_notice.affects_senior_school = True
+    return _save_clean(regulatory_notice)
+
+
+@transaction.atomic
+def create_regulatory_impact(
+    *,
+    regulatory_notice: RegulatoryNotice,
+    impact_category: str,
+    action_required: str,
+    affected_grade_level: GradeLevel | None = None,
+    affected_learning_area: LearningArea | None = None,
+    affected_pathway: str = "",
+    impact_severity: str = RegulatoryImpact.Severity.MEDIUM,
+) -> RegulatoryImpact:
+    return _save_clean(
+        RegulatoryImpact(
+            regulatory_notice=regulatory_notice,
+            affected_grade_level=affected_grade_level,
+            affected_learning_area=affected_learning_area,
+            affected_pathway=affected_pathway,
+            impact_category=impact_category,
+            impact_severity=impact_severity,
+            action_required=action_required,
+        )
+    )
+
+
+@transaction.atomic
+def map_teacher_readiness_requirement(
+    *,
+    regulatory_notice: RegulatoryNotice,
+    summary: str,
+    affected_learning_area: LearningArea | None = None,
+    affected_grade_level: GradeLevel | None = None,
+    affected_pathway: str = "",
+    requirement_type: str | None = None,
+) -> TeacherReadinessRequirement:
+    mapped_type = requirement_type or map_teacher_requirement_algorithm(
+        title=regulatory_notice.title,
+        summary=f"{regulatory_notice.summary} {summary}",
+    )
+    return _save_clean(
+        TeacherReadinessRequirement(
+            regulatory_notice=regulatory_notice,
+            affected_learning_area=affected_learning_area,
+            affected_grade_level=affected_grade_level,
+            affected_pathway=affected_pathway,
+            requirement_type=mapped_type,
+            summary=summary,
+            effective_from=regulatory_notice.effective_date,
+        )
+    )
+
+
+@transaction.atomic
+def build_principal_notification_evidence_card(
+    *,
+    tenant: Any,
+    regulatory_notice: RegulatoryNotice | None = None,
+    curriculum_diff: CurriculumDiff | None = None,
+    curriculum_impact: CurriculumImpact | None = None,
+    notification_type: str = (
+        PrincipalNotificationEvidenceCard.NotificationType.REGULATORY_NOTICE
+    ),
+    impact_summary: str = "Senior School regulatory update requires review.",
+    required_action: str = "Principal review is required.",
+    severity: str = PrincipalNotificationEvidenceCard.Severity.MEDIUM,
+) -> PrincipalNotificationEvidenceCard:
+    if (
+        regulatory_notice is None
+        and curriculum_diff is None
+        and curriculum_impact is None
+    ):
+        raise ValidationError({"regulatory_notice": "Source evidence is required."})
+    authority_name = "Curriculum source"
+    source_reference = "Curriculum diff evidence"
+    checksum = ""
+    review_status = "approved"
+    if regulatory_notice is not None:
+        authority_name = regulatory_notice.authority.name
+        source = regulatory_notice.source_document
+        artifact = regulatory_notice.source_artifact
+        source_reference = (
+            source.document_code
+            if source is not None
+            else str(artifact.file_name if artifact is not None else "")
+        )
+        checksum = (
+            source.checksum
+            if source is not None and source.checksum
+            else getattr(artifact, "checksum", "")
+        )
+        review_status = regulatory_notice.review_status
+    payload = build_notification_payload(
+        authority_name=authority_name,
+        source_reference=source_reference,
+        checksum=checksum,
+        review_status=review_status,
+        impact_summary=impact_summary,
+        required_action=required_action,
+    )
+    return _save_clean(
+        PrincipalNotificationEvidenceCard(
+            tenant=tenant,
+            regulatory_notice=regulatory_notice,
+            curriculum_diff=curriculum_diff,
+            curriculum_impact=curriculum_impact,
+            notification_type=notification_type,
+            title=payload["title"],
+            summary=payload["summary"],
+            evidence_summary=payload["evidence_summary"],
+            required_action=payload["required_action"],
+            severity=severity,
+            status=PrincipalNotificationEvidenceCard.Status.READY_FOR_REVIEW,
+        )
+    )
+
+
+@transaction.atomic
+def issue_principal_notification_evidence_card(
+    *,
+    evidence_card: PrincipalNotificationEvidenceCard,
+) -> PrincipalNotificationEvidenceCard:
+    if (
+        evidence_card.status
+        != PrincipalNotificationEvidenceCard.Status.READY_FOR_REVIEW
+    ):
+        raise ValidationError({"status": "Evidence card is not ready for issue."})
+    evidence_card.status = PrincipalNotificationEvidenceCard.Status.ISSUED
+    return _save_clean(evidence_card)
+
+
+@transaction.atomic
+def acknowledge_school_update(
+    *,
+    evidence_card: PrincipalNotificationEvidenceCard,
+    tenant: Any,
+    acknowledged_by: Any,
+    acknowledgement_status: str,
+    principal_notes: str = "",
+) -> SchoolUpdateAcknowledgement:
+    if evidence_card.tenant_id != tenant.id:
+        raise ValidationError({"tenant": "Acknowledgement tenant is invalid."})
+    if evidence_card.status not in {
+        PrincipalNotificationEvidenceCard.Status.ISSUED,
+        PrincipalNotificationEvidenceCard.Status.ACKNOWLEDGED,
+    }:
+        raise ValidationError({"status": "Notification has not been issued."})
+    acknowledgement = _save_clean(
+        SchoolUpdateAcknowledgement(
+            tenant=tenant,
+            notification_evidence_card=evidence_card,
+            acknowledged_by=acknowledged_by,
+            acknowledged_at=timezone.now(),
+            acknowledgement_status=acknowledgement_status,
+            principal_notes=principal_notes,
+        )
+    )
+    evidence_card.status = PrincipalNotificationEvidenceCard.Status.ACKNOWLEDGED
+    evidence_card.acknowledged_at = acknowledgement.acknowledged_at
+    evidence_card.acknowledged_by = acknowledged_by
+    _save_clean(evidence_card)
+    return acknowledgement
+
+
+@transaction.atomic
+def archive_notification_evidence_card(
+    *,
+    evidence_card: PrincipalNotificationEvidenceCard,
+) -> PrincipalNotificationEvidenceCard:
+    evidence_card.status = PrincipalNotificationEvidenceCard.Status.ARCHIVED
+    return _save_clean(evidence_card)

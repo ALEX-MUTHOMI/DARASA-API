@@ -4,7 +4,11 @@ from academics.models import TeacherAssignment
 from core.models import Role
 from core.policies import PolicyContext
 from core.selectors import user_has_role_in_tenant
-from curriculum.models import CurriculumLearningArea, SpecificLearningOutcome
+from curriculum.models import (
+    CurriculumLearningArea,
+    PrincipalNotificationEvidenceCard,
+    SpecificLearningOutcome,
+)
 
 
 CURRICULUM_MANAGE_ROLES = frozenset(
@@ -157,4 +161,67 @@ def can_supersede_curriculum_version(context: PolicyContext) -> bool:
     return (
         context.action == "curriculum.cct.supersede_version"
         and _is_manager(context)
+    )
+
+
+def can_view_regulatory_notice(context: PolicyContext) -> bool:
+    return (
+        context.action == "curriculum.regulatory.view"
+        and _context_is_valid(context)
+        and context.role.code in CURRICULUM_VIEW_ROLES
+    )
+
+
+def can_register_regulatory_notice(context: PolicyContext) -> bool:
+    return (
+        context.action == "curriculum.regulatory.register"
+        and _is_manager(context)
+    )
+
+
+def can_review_regulatory_notice(context: PolicyContext) -> bool:
+    return (
+        context.action == "curriculum.regulatory.review"
+        and _is_manager(context)
+    )
+
+
+def can_classify_regulatory_notice(context: PolicyContext) -> bool:
+    return (
+        context.action == "curriculum.regulatory.classify"
+        and _is_manager(context)
+    )
+
+
+def can_create_impact_analysis(context: PolicyContext) -> bool:
+    return (
+        context.action == "curriculum.regulatory.create_impact"
+        and _is_manager(context)
+    )
+
+
+def can_issue_principal_notification(context: PolicyContext) -> bool:
+    return (
+        context.action == "curriculum.notification.issue"
+        and _is_manager(context)
+    )
+
+
+def can_acknowledge_principal_notification(
+    context: PolicyContext,
+    *,
+    evidence_card: PrincipalNotificationEvidenceCard,
+) -> bool:
+    return (
+        context.action == "curriculum.notification.acknowledge"
+        and _is_manager(context)
+        and evidence_card.tenant_id == context.tenant.id
+    )
+
+
+def can_view_teacher_readiness_requirement(context: PolicyContext) -> bool:
+    return (
+        context.action == "curriculum.teacher_readiness.view"
+        and _context_is_valid(context)
+        and context.role.code in CURRICULUM_VIEW_ROLES
     )
