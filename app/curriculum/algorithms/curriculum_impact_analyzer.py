@@ -1,3 +1,10 @@
+"""Map curriculum diffs to review impacts without downstream mutation.
+
+These rules intentionally produce advisory impacts only.  Future schemes,
+grading, reports, and lesson-assistant modules can consume approved evidence
+later, but Phase 4C must not change those systems automatically.
+"""
+
 from __future__ import annotations
 
 from collections.abc import Mapping

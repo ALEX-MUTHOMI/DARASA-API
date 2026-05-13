@@ -1,3 +1,11 @@
+"""Curriculum publication workflow guard.
+
+This module encodes the security boundary between "a change was detected" and
+"a version became active."  Direct detected-to-published transitions are
+forbidden so source registration, review, approval, and publication remain
+auditable and separate.
+"""
+
 from __future__ import annotations
 
 from django.core.exceptions import ValidationError

@@ -1,3 +1,11 @@
+"""Validate official curriculum source URLs without opening the network.
+
+CCT treats URLs as evidence metadata, not fetch instructions.  The validator
+therefore accepts only canonical HTTPS references on pre-approved authority
+domains and rejects URL tricks before any future ingestion layer could see
+them.
+"""
+
 from __future__ import annotations
 
 from urllib.parse import urlsplit, urlunsplit
@@ -35,6 +43,10 @@ def validate_source_url(
         port = parsed.port
     except ValueError as exc:
         raise ValidationError({"source_url": "Invalid source URL port."}) from exc
+    if port and port != 443:
+        raise ValidationError(
+            {"source_url": "Only the canonical HTTPS port is allowed."}
+        )
     if port:
         netloc = f"{host}:{port}"
 

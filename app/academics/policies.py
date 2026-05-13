@@ -1,3 +1,10 @@
+"""Assignment-aware academic ABAC policies.
+
+Academic data is tenant-scoped learner data.  Administrators must be bound to
+the tenant, and teachers only pass checks through active cohort/learning-area
+assignments.  Missing tenant, role, actor, or assignment denies by default.
+"""
+
 from __future__ import annotations
 
 from academics.models import Cohort, LearningArea, Student, TeacherAssignment

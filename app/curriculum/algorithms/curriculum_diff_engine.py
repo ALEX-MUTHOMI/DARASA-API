@@ -1,3 +1,10 @@
+"""Deterministic curriculum graph diffing.
+
+The diff engine compares controlled snapshots that were already accepted into
+the curriculum record.  It does not fetch, parse PDFs, call model services, or
+mutate the database; services decide how to persist the resulting review items.
+"""
+
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping

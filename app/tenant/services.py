@@ -1,3 +1,10 @@
+"""Tenant provisioning services.
+
+Provisioning is atomic because partial schools are security liabilities: a
+tenant, domain, principal user, role, and role binding must either all exist or
+all roll back.  Public errors stay generic to avoid account/domain enumeration.
+"""
+
 from __future__ import annotations
 
 import uuid

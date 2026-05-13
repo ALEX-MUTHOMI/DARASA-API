@@ -1,3 +1,11 @@
+"""Fail-closed host validation for curriculum source metadata.
+
+The guard performs string/IP classification only.  It deliberately does not
+resolve DNS or make network calls because CCT is a governance record, not a
+crawler.  Future fetch code must pass through this allowlist before touching a
+network socket.
+"""
+
 from __future__ import annotations
 
 import ipaddress

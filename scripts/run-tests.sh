@@ -4,6 +4,8 @@ set -eo pipefail
 MODE="${1:-unit}"
 PYTEST_CONFIG_ARGS=()
 PHASE4_MARKER_EXPRESSION="not chaos and not integration and not phase5 and not phase6 and not future"
+# Phase 6 grading is intentionally quarantined until its migrations are created.
+# This keeps default CI honest for Phases 1-4C without activating future models.
 PHASE4_IGNORE_ARGS=(--ignore=app/grading/tests)
 PYTEST_COMMAND=(pytest)
 

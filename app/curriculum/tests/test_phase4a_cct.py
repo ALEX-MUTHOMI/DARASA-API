@@ -105,6 +105,7 @@ def test_source_url_validator_accepts_only_approved_official_hosts():
         "https://kicd.ac.ke.evil.com/fake.pdf",
         "https://kicd.ac.ke@evil.com/file.pdf",
         "http://kicd.ac.ke/insecure.pdf",
+        "https://kicd.ac.ke:8443/alternate-port.pdf",
         "https://kicd.ac.ke:invalid/file.pdf",
         "http://127.0.0.1:8000/admin",
         "http://10.0.0.5/internal",

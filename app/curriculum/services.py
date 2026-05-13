@@ -1,3 +1,12 @@
+"""Write-side curriculum services.
+
+The services in this module are deliberately explicit about workflow state:
+registering a source, approving a change, publishing a curriculum version,
+issuing a principal evidence card, and acknowledging that card are separate
+operations.  Keeping those steps apart prevents mass-assignment shortcuts and
+preserves the audit trail a school principal needs.
+"""
+
 from __future__ import annotations
 
 from typing import Any
@@ -601,6 +610,7 @@ def register_regulatory_notice(
     reviewed_by: Any | None = None,
     status: str | None = None,
 ) -> RegulatoryNotice:
+    """Register source-backed regulatory intelligence without auto-activation."""
     _ = status
     if review_status == RegulatoryNotice.ReviewStatus.VERIFIED:
         _require_active_reviewer(reviewed_by)
@@ -724,6 +734,7 @@ def build_principal_notification_evidence_card(
     required_action: str = "Principal review is required.",
     severity: str = PrincipalNotificationEvidenceCard.Severity.MEDIUM,
 ) -> PrincipalNotificationEvidenceCard:
+    """Create a review-ready card from verified evidence, not a delivery event."""
     if (
         regulatory_notice is None
         and curriculum_diff is None
@@ -797,6 +808,7 @@ def acknowledge_school_update(
     acknowledgement_status: str,
     principal_notes: str = "",
 ) -> SchoolUpdateAcknowledgement:
+    """Record school acknowledgement without activating curriculum changes."""
     if evidence_card.tenant_id != tenant.id:
         raise ValidationError({"tenant": "Acknowledgement tenant is invalid."})
     if evidence_card.status not in {

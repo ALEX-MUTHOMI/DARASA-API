@@ -330,6 +330,7 @@ CELERY_BEAT_SCHEDULER = "django_celery_beat.schedulers:DatabaseScheduler"
 
 
 def _get_fernet_encryption_key() -> str:
+    """Validate encryption configuration before the app can serve traffic."""
     key = env("FERNET_ENCRYPTION_KEY", default="").strip()
     if not key:
         if TESTING:

@@ -1,3 +1,10 @@
+"""Fail-closed curriculum and CCT policy helpers.
+
+RBAC grants only broad capability; these helpers still require a tenant-bound
+actor, an active role binding, and the exact action being checked.  Unknown
+actions and missing context always deny.
+"""
+
 from __future__ import annotations
 
 from academics.models import TeacherAssignment

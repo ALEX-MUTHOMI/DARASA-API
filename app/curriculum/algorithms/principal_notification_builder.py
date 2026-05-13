@@ -1,3 +1,10 @@
+"""Build evidence-backed principal notification text.
+
+Notifications are not curriculum activation.  Every payload includes the
+no-auto-mutation statement so principals can review official evidence without
+Darasa silently changing school records.
+"""
+
 from __future__ import annotations
 
 from collections.abc import Mapping
