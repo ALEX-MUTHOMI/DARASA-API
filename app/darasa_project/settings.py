@@ -156,17 +156,19 @@ SHARED_APPS = [
     "drf_spectacular",
     "tenant",
     "core",
+    "academics",
+    "curriculum",
 ]
 
 TENANT_APPS = [
     "django.contrib.contenttypes",
-    "academics",
-    "grading",
-    "curriculum",
     "disciplinary",
     "portals",
     "bus",
 ]
+
+# Phase 6 quarantine: grading contains future-phase models and must remain
+# inactive until the grading engine phase creates intentional migrations.
 
 INSTALLED_APPS = SHARED_APPS + [
     app_name for app_name in TENANT_APPS if app_name not in SHARED_APPS
@@ -318,7 +320,6 @@ CELERY_TASK_DEFAULT_QUEUE = "bus"
 CELERY_TASK_ROUTES = {
     "bus.tasks.*": {"queue": "bus"},
     "academics.tasks.*": {"queue": "academics"},
-    "grading.tasks.*": {"queue": "grading"},
     "curriculum.tasks.*": {"queue": "curriculum"},
     "disciplinary.tasks.*": {"queue": "disciplinary"},
     "portals.tasks.*": {"queue": "portals"},
@@ -329,6 +330,7 @@ CELERY_BEAT_SCHEDULER = "django_celery_beat.schedulers:DatabaseScheduler"
 
 
 def _get_fernet_encryption_key() -> str:
+    """Validate encryption configuration before the app can serve traffic."""
     key = env("FERNET_ENCRYPTION_KEY", default="").strip()
     if not key:
         if TESTING:

@@ -1,3 +1,10 @@
+"""Core ABAC primitives.
+
+The base policy context is intentionally small and fail-closed.  A role record
+alone never authorizes anything; the role must be active and bound to the actor
+inside the tenant being checked.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field

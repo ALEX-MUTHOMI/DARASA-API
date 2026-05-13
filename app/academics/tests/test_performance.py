@@ -1,35 +1,59 @@
 import pytest
 
-from academics.selectors import get_fast_grid_roster
+from academics.selectors import get_cohort_roster, verify_teacher_assignment
+
 
 pytestmark = [pytest.mark.django_db, pytest.mark.phase3]
 
 
-def test_fast_grid_roster_performance_o1_queries(
+def test_roster_selector_uses_bounded_queries(
     cohort,
     django_assert_max_num_queries,
     enrollment_factory,
-    subject,
+    learning_area,
+    school,
     teacher_assignment_factory,
     teacher_user,
 ):
-    """
-    MANDATORY PERFORMANCE GATE:
-    Asserts that the Fast-Grid roster executes in exactly 2 queries:
-    1. Auth verification (exists)
-    2. Payload retrieval (.values() join)
-    Regardless of roster size (50 students tested here).
-    """
     teacher_assignment_factory(
+        tenant=school,
         teacher=teacher_user,
         cohort=cohort,
-        subject=subject,
+        learning_area=learning_area,
     )
-    enrollment_factory.create_batch(50, cohort=cohort)
+    enrollment_factory.create_batch(50, tenant=school, cohort=cohort)
 
     with django_assert_max_num_queries(2):
-        roster = get_fast_grid_roster(teacher_user, cohort.id, subject.id)
+        roster = get_cohort_roster(
+            tenant=school,
+            actor=teacher_user,
+            cohort=cohort,
+            learning_area=learning_area,
+        )
 
     assert len(roster) == 50
-    assert "admission_number" in roster[0]
-    assert "first_name" in roster[0]
+    assert {"id", "first_name", "last_name", "admission_number"} <= set(roster[0])
+
+
+def test_teacher_assignment_verification_uses_bounded_queries(
+    cohort,
+    django_assert_max_num_queries,
+    learning_area,
+    school,
+    teacher_assignment_factory,
+    teacher_user,
+):
+    teacher_assignment_factory(
+        tenant=school,
+        teacher=teacher_user,
+        cohort=cohort,
+        learning_area=learning_area,
+    )
+
+    with django_assert_max_num_queries(1):
+        assert verify_teacher_assignment(
+            tenant=school,
+            teacher=teacher_user,
+            cohort=cohort,
+            learning_area=learning_area,
+        )
