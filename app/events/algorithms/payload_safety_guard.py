@@ -28,8 +28,11 @@ SENSITIVE_KEY_FRAGMENTS = (
     "private_key",
     "raw_curriculum",
     "raw_payload",
+    "raw_uploaded_file",
     "secret",
     "student_name",
+    "student_names",
+    "teacher_private_notes",
     "token",
 )
 SENSITIVE_VALUE_PATTERNS = (

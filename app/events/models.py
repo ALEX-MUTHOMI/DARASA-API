@@ -14,6 +14,7 @@ from django.core.exceptions import ValidationError
 from django.db import models
 from django.utils import timezone
 
+from events.algorithms.producer_authorizer import authorize_producer
 from events.validators import (
     reject_sensitive_payload,
     validate_event_payload,
@@ -138,8 +139,10 @@ class EventOutbox(TimeStampedModel):
         ).first()
         if registry is None:
             raise ValidationError({"event_type": "Active event type is required."})
-        if self.source_module not in registry.allowed_producers:
-            raise ValidationError({"source_module": "Producer is not allowlisted."})
+        authorize_producer(
+            producer=self.source_module,
+            allowed_producers=registry.allowed_producers,
+        )
         if registry.requires_tenant and self.tenant_id is None:
             raise ValidationError({"tenant": "Tenant is required for this event."})
         if not self.idempotency_key.strip():

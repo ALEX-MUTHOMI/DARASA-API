@@ -1,4 +1,5 @@
 from datetime import timedelta
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -75,6 +76,20 @@ def test_event_type_normalization_accepts_facts_and_rejects_commands():
         normalize_event_name("delete_everything.v1")
     with pytest.raises(ValidationError):
         normalize_event_name("curriculum.version_published")
+
+
+@pytest.mark.parametrize(
+    "event_name",
+    [
+        "send_message_now.v1",
+        "publish_now.v1",
+        "delete_everything.v1",
+        "update_school_now.v1",
+    ],
+)
+def test_command_shaped_event_names_fail_closed(event_name):
+    with pytest.raises(ValidationError):
+        normalize_event_name(event_name)
 
 
 def test_contract_validation_rejects_inactive_missing_tenant_and_payload_gaps():
@@ -159,6 +174,16 @@ def test_payload_schema_and_safety_reject_bad_shapes_and_sensitive_data():
         reject_sensitive_payload({"nested": {"password": "hidden"}})
     with pytest.raises(ValidationError):
         reject_sensitive_payload({"learner_names": ["Jane Doe"]})
+    with pytest.raises(ValidationError):
+        reject_sensitive_payload({"student_names": ["Jane Doe"]})
+    with pytest.raises(ValidationError):
+        reject_sensitive_payload({"guardian_phone": "+254700000000"})
+    with pytest.raises(ValidationError):
+        reject_sensitive_payload({"raw_curriculum_text": "full source text"})
+    with pytest.raises(ValidationError):
+        reject_sensitive_payload({"raw_uploaded_file": "binary-content"})
+    with pytest.raises(ValidationError):
+        reject_sensitive_payload({"teacher_private_notes": "sensitive note"})
     with pytest.raises(ValidationError):
         validate_payload_size({"data": "x" * 50}, max_bytes=10)
 
@@ -277,3 +302,27 @@ def test_priority_ordering_and_batch_planner_are_bounded_and_lock_safe():
 
     assert planned == [critical, stale]
     assert locked not in planned
+
+
+def test_event_algorithm_modules_are_side_effect_free():
+    algorithms_dir = Path(__file__).resolve().parents[1] / "algorithms"
+    blocked_tokens = [
+        "from events.models",
+        "import events.models",
+        ".objects.",
+        ".save(",
+        ".create(",
+        "requests.",
+        "httpx",
+        "aiohttp",
+        "boto" + "3",
+        "Event" + "Bridge",
+        "Kaf" + "ka",
+        "Kine" + "sis",
+        "Kuber" + "netes",
+    ]
+
+    for module_path in algorithms_dir.glob("*.py"):
+        text = module_path.read_text()
+        for token in blocked_tokens:
+            assert token not in text, f"{module_path.name} contains {token}"

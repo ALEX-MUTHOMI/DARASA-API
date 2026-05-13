@@ -159,6 +159,23 @@ def test_registry_rejects_duplicate_inactive_unknown_and_invalid_events():
             payload_schema={},
         )
 
+    for command_event in [
+        "publish_now",
+        "delete_everything",
+        "update_school_now",
+    ]:
+        with pytest.raises(ValidationError):
+            register_event_type(
+                event_type=command_event,
+                event_version=1,
+                description="Invalid command-shaped event.",
+                source_module="tenant",
+                allowed_producers=["tenant"],
+                allowed_consumers=["audit"],
+                requires_tenant=True,
+                payload_schema={},
+            )
+
 
 def test_outbox_transaction_idempotency_payload_and_pii_controls():
     school = _school()
@@ -402,3 +419,10 @@ def test_phase_boundaries_and_docs_exist(app_root, settings):
     assert (docs_root / "EVENT_CONTRACTS.md").exists()
     assert (docs_root / "DEVELOPER_EVENT_GUIDE.md").exists()
     assert (docs_root / "EVENT_ALGORITHMS.md").exists()
+
+    event_backbone_doc = (docs_root / "EVENT_BACKBONE.md").read_text()
+    codeowners = (app_root.parent / ".github" / "CODEOWNERS").read_text()
+    assert "Darasa is reliable-first" in event_backbone_doc
+    assert "Phase 10 API / Integration Contract Suite" in event_backbone_doc
+    assert "docs/EVENT_ALGORITHMS.md" in codeowners
+    assert "placeholder owners" in codeowners.lower()

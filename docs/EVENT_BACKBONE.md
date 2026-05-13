@@ -39,3 +39,30 @@ retry/backoff decisions, dead-letter classification, partition keys, audit
 hashing, and batch planning to that package.
 
 See `docs/EVENT_ALGORITHMS.md` before adding a new event rule.
+
+## Reliable-First Roadmap
+
+Darasa is reliable-first. Real-time delivery comes later only where justified
+by stable API contracts, durable notification records, and measured operational
+need.
+
+Future work belongs in these phases:
+
+- API idempotency headers: Phase 10 API / Integration Contract Suite.
+- Frontend retry behavior: client reliability phase after API contracts exist.
+- Offline drafts: client reliability phase after core teacher workflows exist.
+- Resumable uploads: Phase 11/15 using claim-check or presigned upload pattern.
+- Mobile sync: post-core client reliability phase.
+- Production HA database: Phase 15 Production Readiness.
+- Read replicas: Phase 14 performance baseline, Phase 15 production.
+- Load balancer: Phase 15.
+- CloudWatch/Prometheus dashboards: Phase 11 hooks, Phase 14 metrics baseline,
+  Phase 15 production dashboards.
+- Autoscaling: Phase 15.
+- Regional routing: Phase 15 or later after traffic patterns justify it.
+- AWS WAF/Shield: Phase 13 design, Phase 15 production deployment.
+- External broker adapter, including AWS EventBridge, AWS SQS, Kafka, or
+  Kinesis: Phase 14 decision, Phase 15 implementation only if justified.
+- Kubernetes deployment: Phase 15 production infrastructure, not Phase 5.
+- Real-time delivery: after reliable notification inboxes and projections
+  exist.

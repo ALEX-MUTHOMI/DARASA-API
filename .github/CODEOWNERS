@@ -14,3 +14,5 @@ scripts/** @backtofront-development/platform-security
 docs/SECURITY_MODEL.md @backtofront-development/platform-security
 docs/EVENT_BACKBONE.md @backtofront-development/platform-security
 docs/EVENT_CONTRACTS.md @backtofront-development/platform-security
+docs/EVENT_ALGORITHMS.md @backtofront-development/platform-security
+docs/DEVELOPER_EVENT_GUIDE.md @backtofront-development/platform-security
