@@ -41,6 +41,7 @@ from curriculum.services import (
     approve_change_set,
     create_curriculum_change_set,
     create_curriculum_publication,
+    create_curriculum_version,
     publish_curriculum_version,
     register_curriculum_authority,
     register_source_artifact,
@@ -103,6 +104,8 @@ def test_source_url_validator_accepts_only_approved_official_hosts():
     rejected_urls = [
         "https://kicd.ac.ke.evil.com/fake.pdf",
         "https://kicd.ac.ke@evil.com/file.pdf",
+        "http://kicd.ac.ke/insecure.pdf",
+        "https://kicd.ac.ke:invalid/file.pdf",
         "http://127.0.0.1:8000/admin",
         "http://10.0.0.5/internal",
         "http://169.254.169.254/latest/meta-data",
@@ -114,6 +117,24 @@ def test_source_url_validator_accepts_only_approved_official_hosts():
     for url in rejected_urls:
         with pytest.raises(ValidationError):
             validate_source_url(url, allowed_domains=allowed)
+
+
+def test_authority_registry_rejects_unknown_or_poisoned_domains():
+    with pytest.raises(ValidationError):
+        register_curriculum_authority(
+            code="evil-official",
+            name="Fake Official Curriculum Authority",
+            official_website="https://evil.example",
+            allowed_domains=["evil.example"],
+        )
+
+    with pytest.raises(ValidationError):
+        register_curriculum_authority(
+            code="kicd",
+            name="Poisoned KICD",
+            official_website="https://kicd.ac.ke.evil.com",
+            allowed_domains=["kicd.ac.ke.evil.com"],
+        )
 
 
 def test_checksum_fingerprint_and_change_detection_are_deterministic():
@@ -169,6 +190,30 @@ def test_artifact_validator_rejects_resource_exhaustion_and_unsupported_types():
         )
 
 
+def test_artifact_registration_rejects_path_traversal_and_size_mismatch(
+    source_document,
+):
+    with pytest.raises(ValidationError):
+        register_source_artifact(
+            source_document=source_document,
+            file_name="../poison.pdf",
+            content_type="application/pdf",
+            file_size=6,
+            content=b"source",
+            capture_method=SourceArtifact.CaptureMethod.MANUAL_UPLOAD,
+        )
+
+    with pytest.raises(ValidationError):
+        register_source_artifact(
+            source_document=source_document,
+            file_name="source.pdf",
+            content_type="application/pdf",
+            file_size=999,
+            content=b"source",
+            capture_method=SourceArtifact.CaptureMethod.MANUAL_UPLOAD,
+        )
+
+
 def test_pii_guard_rejects_obvious_learner_specific_governance_text():
     validate_governance_text("Source changed for Grade 4 Integrated Science.")
 
@@ -218,12 +263,13 @@ def test_authority_source_artifact_and_change_set_workflow(
         source_url="https://kicd.ac.ke/cbc-materials/curriculum-designs/",
         checksum="sha256:" + "b" * 64,
     )
+    artifact_content = b"official curriculum reference"
     artifact = register_source_artifact(
         source_document=source_document,
         file_name="grade-4.pdf",
         content_type="application/pdf",
-        file_size=1024,
-        content=b"official curriculum reference",
+        file_size=len(artifact_content),
+        content=artifact_content,
         capture_method=SourceArtifact.CaptureMethod.MANUAL_UPLOAD,
     )
     change_set = create_curriculum_change_set(
@@ -259,6 +305,55 @@ def test_authority_source_artifact_and_change_set_workflow(
     approved.refresh_from_db()
     assert approved.status == CurriculumChangeSet.Status.PUBLISHED
     assert publication.is_active
+
+
+def test_publication_rejects_workflow_bypass_and_version_swap(
+    curriculum_version,
+    principal_user,
+    source_document,
+):
+    alternate_version = create_curriculum_version(
+        source_document=source_document,
+        version_label="alternate-version",
+        effective_from="2028-01-01",
+        is_active=False,
+    )
+    change_set = create_curriculum_change_set(
+        source_document=source_document,
+        proposed_curriculum_version=curriculum_version,
+        change_type=CurriculumChangeSet.ChangeType.NEW_VERSION,
+        summary="Reviewed official source update.",
+    )
+    approved = approve_change_set(change_set=change_set, reviewed_by=principal_user)
+
+    with pytest.raises(ValidationError):
+        create_curriculum_publication(
+            curriculum_version=curriculum_version,
+            approved_by=principal_user,
+            effective_from="2026-01-01",
+            publication_notes="Direct active publication bypass.",
+        )
+
+    with pytest.raises(ValidationError):
+        publish_curriculum_version(
+            change_set=approved,
+            curriculum_version=alternate_version,
+            approved_by=principal_user,
+            effective_from="2026-01-01",
+        )
+
+
+def test_review_actions_require_active_reviewer(source_document, principal_user):
+    change_set = create_curriculum_change_set(
+        source_document=source_document,
+        change_type=CurriculumChangeSet.ChangeType.SOURCE_CHANGED,
+        summary="Official source change proposed.",
+    )
+    principal_user.is_active = False
+    principal_user.save(update_fields=["is_active"])
+
+    with pytest.raises(ValidationError):
+        approve_change_set(change_set=change_set, reviewed_by=principal_user)
 
 
 def test_inactive_authority_cannot_register_source():
@@ -306,7 +401,15 @@ def test_publication_preserves_old_versions(
     principal_user,
     source_document,
 ):
-    old_publication = create_curriculum_publication(
+    change_set = create_curriculum_change_set(
+        source_document=source_document,
+        proposed_curriculum_version=curriculum_version,
+        change_type=CurriculumChangeSet.ChangeType.NEW_VERSION,
+        summary="Initial official publication reviewed.",
+    )
+    approved = approve_change_set(change_set=change_set, reviewed_by=principal_user)
+    old_publication = publish_curriculum_version(
+        change_set=approved,
         curriculum_version=curriculum_version,
         approved_by=principal_user,
         effective_from="2026-01-01",
@@ -345,12 +448,13 @@ def test_selectors_are_ordered_hidden_and_bounded(
         official_website="https://knec.ac.ke",
         allowed_domains=["knec.ac.ke"],
     )
+    artifact_content = b"source"
     register_source_artifact(
         source_document=source_document,
         file_name="source.pdf",
         content_type="application/pdf",
-        file_size=128,
-        content=b"source",
+        file_size=len(artifact_content),
+        content=artifact_content,
         capture_method=SourceArtifact.CaptureMethod.MANUAL_UPLOAD,
     )
     create_curriculum_change_set(
@@ -362,6 +466,7 @@ def test_selectors_are_ordered_hidden_and_bounded(
         curriculum_version=curriculum_version,
         effective_from=timezone.now().date(),
         publication_notes="Reviewed publication.",
+        is_active=False,
     )
 
     with django_assert_max_num_queries(1):
@@ -372,16 +477,14 @@ def test_selectors_are_ordered_hidden_and_bounded(
     with django_assert_max_num_queries(1):
         assert len(list(get_pending_change_sets())) == 1
     with django_assert_max_num_queries(1):
-        assert get_active_curriculum_publication() == publication
+        assert get_active_curriculum_publication() is None
 
     assert list(get_source_document_history(authority=authority)) == []
-    assert resolve_curriculum_version_for_date(on_date=timezone.now().date()) == (
-        curriculum_version
-    )
+    assert resolve_curriculum_version_for_date(on_date=timezone.now().date()) is None
     assert resolve_publication_for_date(
         [publication],
         on_date=timezone.now().date(),
-    ) == publication
+    ) is None
 
 
 def test_curriculum_governance_policies_fail_closed(

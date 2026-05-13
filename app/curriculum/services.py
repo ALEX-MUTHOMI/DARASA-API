@@ -39,6 +39,11 @@ def _save_clean(instance: Any) -> Any:
     return instance
 
 
+def _require_active_reviewer(user: Any) -> None:
+    if user is None or not getattr(user, "is_active", False):
+        raise ValidationError({"reviewed_by": "An active reviewer is required."})
+
+
 @transaction.atomic
 def register_curriculum_authority(
     *,
@@ -100,6 +105,8 @@ def register_source_artifact(
     content: bytes,
     capture_method: str,
 ) -> SourceArtifact:
+    if file_size != len(content):
+        raise ValidationError({"file_size": "Artifact size does not match content."})
     checksum = compute_source_checksum(content)
     return _save_clean(
         SourceArtifact(
@@ -158,6 +165,7 @@ def approve_change_set(
     change_set: CurriculumChangeSet,
     reviewed_by: Any,
 ) -> CurriculumChangeSet:
+    _require_active_reviewer(reviewed_by)
     _move_change_set_to_review(change_set)
     validate_transition(
         change_set.status,
@@ -175,6 +183,7 @@ def reject_change_set(
     change_set: CurriculumChangeSet,
     reviewed_by: Any,
 ) -> CurriculumChangeSet:
+    _require_active_reviewer(reviewed_by)
     if change_set.status not in {
         CurriculumChangeSet.Status.DETECTED,
         CurriculumChangeSet.Status.QUARANTINED,
@@ -197,7 +206,14 @@ def create_curriculum_publication(
     approved_by: Any | None = None,
     effective_to: str | None = None,
     is_active: bool = True,
+    workflow_approved: bool = False,
 ) -> CurriculumPublication:
+    if is_active and not workflow_approved:
+        raise ValidationError(
+            {"is_active": "Active publication requires approved workflow."}
+        )
+    if is_active:
+        _require_active_reviewer(approved_by)
     return _save_clean(
         CurriculumPublication(
             curriculum_version=curriculum_version,
@@ -223,12 +239,18 @@ def publish_curriculum_version(
         raise ValidationError(
             {"curriculum_version": "Approved curriculum version is required."}
         )
+    _require_active_reviewer(approved_by)
+    if change_set.proposed_curriculum_version_id != curriculum_version.id:
+        raise ValidationError(
+            {"curriculum_version": "Published version must match the change set."}
+        )
     validate_transition(change_set.status, CurriculumChangeSet.Status.PUBLISHED)
     publication = create_curriculum_publication(
         curriculum_version=curriculum_version,
         approved_by=approved_by,
         effective_from=effective_from,
         publication_notes=publication_notes,
+        workflow_approved=True,
     )
     change_set.status = CurriculumChangeSet.Status.PUBLISHED
     change_set.reviewed_by = approved_by

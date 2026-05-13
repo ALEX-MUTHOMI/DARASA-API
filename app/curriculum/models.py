@@ -11,7 +11,11 @@ from django.db.models import Q
 from django.utils.translation import gettext_lazy as _
 
 from academics.models import GradeLevel, LearningArea
-from curriculum.algorithms.artifact_validator import validate_artifact_metadata
+from curriculum.algorithms.artifact_validator import (
+    validate_artifact_file_name,
+    validate_artifact_metadata,
+)
+from curriculum.algorithms.authority_registry import validate_authority_domains
 from curriculum.algorithms.authority_normalizer import normalize_authority_code
 from curriculum.algorithms.pii_guard import validate_governance_text
 from curriculum.algorithms.source_url_validator import validate_source_url
@@ -693,15 +697,10 @@ class CurriculumAuthority(TimeStampedModel):
             raise ValidationError(
                 {"allowed_domains": _("Allowed domains are required.")}
             )
-        self.allowed_domains = [
-            domain.strip().lower().rstrip(".")
-            for domain in self.allowed_domains
-            if isinstance(domain, str) and domain.strip()
-        ]
-        if not self.allowed_domains:
-            raise ValidationError(
-                {"allowed_domains": _("Allowed domains are required.")}
-            )
+        self.allowed_domains = validate_authority_domains(
+            authority_code=self.code,
+            allowed_domains=self.allowed_domains,
+        )
         self.official_website = validate_source_url(
             self.official_website,
             allowed_domains=self.allowed_domains,
@@ -778,7 +777,7 @@ class SourceArtifact(TimeStampedModel):
     def clean(self) -> None:
         super().clean()
         _require_text(self.file_name, "file_name")
-        self.file_name = self.file_name.strip()
+        self.file_name = validate_artifact_file_name(self.file_name)
         self.content_type = self.content_type.strip().lower()
         self.checksum_algorithm = self.checksum_algorithm.strip().lower()
         self.checksum = self.checksum.strip().lower()

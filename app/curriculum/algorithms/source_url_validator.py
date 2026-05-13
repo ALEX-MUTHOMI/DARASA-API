@@ -7,7 +7,7 @@ from django.core.exceptions import ValidationError
 from curriculum.algorithms.ssrf_guard import validate_host
 
 
-ALLOWED_SCHEMES = frozenset({"http", "https"})
+ALLOWED_SCHEMES = frozenset({"https"})
 
 
 def validate_source_url(
@@ -21,7 +21,7 @@ def validate_source_url(
 
     parsed = urlsplit(value)
     if parsed.scheme.lower() not in ALLOWED_SCHEMES:
-        raise ValidationError({"source_url": "Unsupported source URL scheme."})
+        raise ValidationError({"source_url": "HTTPS source URLs are required."})
     if not parsed.hostname:
         raise ValidationError({"source_url": "Malformed source URL."})
     if parsed.username or parsed.password:
@@ -31,8 +31,12 @@ def validate_source_url(
 
     host = validate_host(parsed.hostname, allowed_domains=allowed_domains)
     netloc = host
-    if parsed.port:
-        netloc = f"{host}:{parsed.port}"
+    try:
+        port = parsed.port
+    except ValueError as exc:
+        raise ValidationError({"source_url": "Invalid source URL port."}) from exc
+    if port:
+        netloc = f"{host}:{port}"
 
     return urlunsplit(
         (

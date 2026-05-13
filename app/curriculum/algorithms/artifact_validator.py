@@ -14,6 +14,7 @@ ALLOWED_CONTENT_TYPES = frozenset(
     }
 )
 CHECKSUM_PATTERN = re.compile(r"^sha256:[0-9a-f]{64}$")
+SAFE_FILE_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,254}$")
 
 
 def validate_artifact_metadata(
@@ -28,3 +29,15 @@ def validate_artifact_metadata(
         raise ValidationError({"content_type": "Artifact content type is not allowed."})
     if not CHECKSUM_PATTERN.fullmatch(checksum.strip().lower()):
         raise ValidationError({"checksum": "A valid SHA-256 checksum is required."})
+
+
+def validate_artifact_file_name(file_name: str) -> str:
+    value = file_name.strip()
+    if (
+        not SAFE_FILE_NAME_PATTERN.fullmatch(value)
+        or ".." in value
+        or "/" in value
+        or "\\" in value
+    ):
+        raise ValidationError({"file_name": "Artifact file name is not allowed."})
+    return value
