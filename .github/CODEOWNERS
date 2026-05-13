@@ -1,0 +1,16 @@
+# Replace these placeholder owners with real repository teams before relying on
+# branch protection. The paths still document which surfaces require platform
+# and security review.
+
+app/events/** @backtofront-development/platform-security
+app/darasa_project/settings.py @backtofront-development/platform-security
+app/darasa_project/celery.py @backtofront-development/platform-security
+.github/workflows/** @backtofront-development/platform-security
+Dockerfile @backtofront-development/platform-security
+docker-compose.yml @backtofront-development/platform-security
+pyproject.toml @backtofront-development/platform-security
+poetry.lock @backtofront-development/platform-security
+scripts/** @backtofront-development/platform-security
+docs/SECURITY_MODEL.md @backtofront-development/platform-security
+docs/EVENT_BACKBONE.md @backtofront-development/platform-security
+docs/EVENT_CONTRACTS.md @backtofront-development/platform-security

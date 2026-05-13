@@ -29,10 +29,20 @@ Phase 4C added Senior School regulatory intelligence: curriculum diffs,
 regulatory notices, teacher-readiness requirements, impact records, and
 principal evidence cards.
 
+Phase 5 adds the event backbone: typed event contracts, a transactional outbox,
+dispatch attempts, consumer idempotency state, dead-letter records, and audit
+events. It is local-first and broker-ready, but it does not add an external
+broker adapter.
+
+Phase 5B hardens the backbone with deterministic algorithms for contract
+validation, producer authorization, payload safety, idempotency, retry/backoff,
+dead-letter classification, priority ordering, partition keys, audit hashing,
+and dispatch batch planning. See `EVENT_ALGORITHMS.md`.
+
 ## Active Boundary Rules
 
-The default test command runs Phase 1 through Phase 4C work and excludes future
-phase markers, integration-heavy tests, and chaos tests.
+The default test command runs Phase 1 through Phase 5B work and excludes Phase
+6, future markers, integration-heavy tests, and chaos tests.
 
 The grading app remains quarantined until its own phase creates intentional
 migrations and policy tests. It must not be added back to the active Django app

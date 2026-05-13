@@ -158,6 +158,7 @@ SHARED_APPS = [
     "core",
     "academics",
     "curriculum",
+    "events",
 ]
 
 TENANT_APPS = [

@@ -34,3 +34,15 @@ validated at startup so encrypted-field behavior cannot silently degrade.
 Governance text rejects obvious learner-specific PII patterns. This keeps
 curriculum updates, regulatory notices, evidence cards, and acknowledgement
 notes from becoming accidental child-data stores.
+
+## Event Backbone
+
+Events are typed, versioned facts. Producers are allowlisted, tenant-scoped
+events require tenant context, idempotency keys are mandatory, and payloads are
+kept small and screened for obvious sensitive fields. Consumers record state so
+duplicate processing is skipped safely, and poison events move to dead letter
+instead of retrying forever.
+
+The event safety rules are implemented in `app/events/algorithms/` and
+documented in `EVENT_ALGORITHMS.md`. Services must delegate security-critical
+event decisions there instead of reimplementing them inline.
