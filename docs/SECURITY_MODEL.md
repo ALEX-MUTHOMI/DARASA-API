@@ -46,3 +46,12 @@ instead of retrying forever.
 The event safety rules are implemented in `app/events/algorithms/` and
 documented in `EVENT_ALGORITHMS.md`. Services must delegate security-critical
 event decisions there instead of reimplementing them inline.
+
+## Grading Records
+
+Grades are sensitive academic records. Phase 6A requires tenant-scoped
+assessments, active teacher assignments for grading access, one active record
+per learner and assessment, score bounds, and auditable correction requests.
+RBAC grants broad capability; ABAC proves the teacher is assigned to the exact
+cohort and learning area. Grade events must carry references and counts, not raw
+marks or learner names.

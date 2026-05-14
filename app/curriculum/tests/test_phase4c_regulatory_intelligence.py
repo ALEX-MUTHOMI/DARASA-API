@@ -143,7 +143,7 @@ def test_4b_curriculum_graph_is_version_aware_and_hidden_by_default(
     from curriculum.selectors import get_outcomes_for_sub_strand
 
     assert list(get_outcomes_for_sub_strand(sub_strand)) == []
-    assert "grading" not in settings.INSTALLED_APPS
+    assert "grading" in settings.INSTALLED_APPS
 
 
 def test_diff_algorithms_are_deterministic_and_detect_assessment_changes():
@@ -608,6 +608,6 @@ def test_phase_boundary_no_live_web_ai_parser_or_future_apps(app_root, settings)
     ]
 
     assert all(not path.exists() for path in forbidden_files)
-    assert "grading" not in settings.INSTALLED_APPS
+    assert "grading" in settings.INSTALLED_APPS
     assert "reports" not in settings.INSTALLED_APPS
     assert "schemes" not in settings.INSTALLED_APPS

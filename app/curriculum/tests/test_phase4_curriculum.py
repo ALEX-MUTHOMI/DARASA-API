@@ -419,6 +419,8 @@ def test_inactive_curriculum_version_not_returned_by_default(
     assert get_active_curriculum_version() != inactive
 
 
-def test_phase_boundaries_keep_grading_quarantined(settings):
-    assert "grading" not in settings.INSTALLED_APPS
+def test_phase_boundaries_keep_future_apps_inactive(settings):
+    assert "grading" in settings.INSTALLED_APPS
     assert "grading" not in settings.TENANT_APPS
+    assert "reports" not in settings.INSTALLED_APPS
+    assert "schemes" not in settings.INSTALLED_APPS

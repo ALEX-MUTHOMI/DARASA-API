@@ -1,0 +1,120 @@
+"""Tenant-aware read paths for grading records."""
+
+from __future__ import annotations
+
+from typing import Any
+from uuid import UUID
+
+from django.db import models
+from django.db.models import QuerySet
+
+from academics.models import TeacherAssignment
+from grading.models import (
+    Assessment,
+    GradeCorrectionRequest,
+    GradeRecord,
+    GradeSubmissionBatch,
+)
+
+
+def _safe_uuid(value: Any) -> UUID | None:
+    try:
+        return UUID(str(value))
+    except (TypeError, ValueError):
+        return None
+
+
+def get_teacher_grading_contexts(
+    *,
+    actor: Any,
+    tenant: Any,
+    academic_year: Any | None = None,
+    term: Any | None = None,
+) -> QuerySet[TeacherAssignment]:
+    if actor is None or tenant is None:
+        return TeacherAssignment.objects.none()
+    queryset = TeacherAssignment.objects.filter(
+        tenant=tenant,
+        teacher=actor,
+        is_active=True,
+        cohort__is_active=True,
+        learning_area__is_active=True,
+    ).select_related("cohort", "learning_area", "academic_year", "term")
+    if academic_year is not None:
+        queryset = queryset.filter(academic_year=academic_year)
+    if term is not None:
+        queryset = queryset.filter(term=term)
+    return queryset
+
+
+def get_assessment_for_teacher(
+    *,
+    actor: Any,
+    tenant: Any,
+    assessment_id: Any,
+) -> Assessment | None:
+    assessment_uuid = _safe_uuid(assessment_id)
+    if actor is None or tenant is None or assessment_uuid is None:
+        return None
+    return (
+        Assessment.objects.filter(
+            id=assessment_uuid,
+            tenant=tenant,
+            cohort__teacher_assignments__teacher=actor,
+            cohort__teacher_assignments__learning_area=models.F("learning_area"),
+            cohort__teacher_assignments__is_active=True,
+        )
+        .select_related("cohort", "learning_area", "academic_year", "term")
+        .first()
+    )
+
+
+def get_grade_records_for_assessment(
+    *,
+    actor: Any,
+    tenant: Any,
+    assessment_id: Any,
+) -> QuerySet[GradeRecord]:
+    assessment = get_assessment_for_teacher(
+        actor=actor,
+        tenant=tenant,
+        assessment_id=assessment_id,
+    )
+    if assessment is None:
+        return GradeRecord.objects.none()
+    return GradeRecord.objects.filter(
+        tenant=tenant,
+        assessment=assessment,
+    ).select_related("student", "assessment", "submission_batch")
+
+
+def get_submission_batches_for_assessment(
+    *,
+    actor: Any,
+    tenant: Any,
+    assessment_id: Any,
+) -> QuerySet[GradeSubmissionBatch]:
+    assessment = get_assessment_for_teacher(
+        actor=actor,
+        tenant=tenant,
+        assessment_id=assessment_id,
+    )
+    if assessment is None:
+        return GradeSubmissionBatch.objects.none()
+    return GradeSubmissionBatch.objects.filter(
+        tenant=tenant,
+        assessment=assessment,
+    ).select_related("teacher", "teacher_assignment", "cohort", "learning_area")
+
+
+def get_pending_corrections_for_reviewer(
+    *,
+    actor: Any,
+    tenant: Any,
+) -> QuerySet[GradeCorrectionRequest]:
+    if actor is None or tenant is None:
+        return GradeCorrectionRequest.objects.none()
+    return GradeCorrectionRequest.objects.filter(
+        tenant=tenant,
+        status=GradeCorrectionRequest.Status.REQUESTED,
+    ).select_related("grade_record", "requested_by")

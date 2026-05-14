@@ -531,7 +531,8 @@ def test_status_mass_assignment_like_override_is_ignored(source_document):
     assert change_set.status == CurriculumChangeSet.Status.DETECTED
 
 
-def test_phase_boundary_no_crawler_or_grading_activation(settings, app_root):
-    assert "grading" not in settings.INSTALLED_APPS
+def test_phase_boundary_no_crawler_or_future_app_activation(settings, app_root):
+    assert "grading" in settings.INSTALLED_APPS
     assert "grading" not in settings.TENANT_APPS
+    assert "reports" not in settings.INSTALLED_APPS
     assert not (app_root / "curriculum" / "crawler.py").exists()

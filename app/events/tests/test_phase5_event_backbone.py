@@ -408,7 +408,10 @@ def test_event_policies_fail_closed_and_inactive_role_denies():
 
 def test_phase_boundaries_and_docs_exist(app_root, settings):
     assert "events" in settings.INSTALLED_APPS
-    assert "grading" not in settings.INSTALLED_APPS
+    assert "grading" in settings.INSTALLED_APPS
+    assert not (app_root / "grading" / "reports.py").exists()
+    assert not (app_root / "grading" / "pdf.py").exists()
+    assert not (app_root / "grading" / "nlp.py").exists()
     assert not (app_root / "events" / "external_broker_dispatcher.py").exists()
     assert not (app_root / "events" / "stream_broker.py").exists()
     assert not (app_root / "curriculum" / "crawler.py").exists()

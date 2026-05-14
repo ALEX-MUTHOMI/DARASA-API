@@ -159,6 +159,7 @@ SHARED_APPS = [
     "academics",
     "curriculum",
     "events",
+    "grading",
 ]
 
 TENANT_APPS = [
@@ -168,8 +169,8 @@ TENANT_APPS = [
     "bus",
 ]
 
-# Phase 6 quarantine: grading contains future-phase models and must remain
-# inactive until the grading engine phase creates intentional migrations.
+# Phase 6A: grading is intentionally active with core academic-record models.
+# Later report, PDF, and parent-facing workflows remain out of scope.
 
 INSTALLED_APPS = SHARED_APPS + [
     app_name for app_name in TENANT_APPS if app_name not in SHARED_APPS

@@ -39,6 +39,11 @@ validation, producer authorization, payload safety, idempotency, retry/backoff,
 dead-letter classification, priority ordering, partition keys, audit hashing,
 and dispatch batch planning. See `EVENT_ALGORITHMS.md`.
 
+Phase 6A activates the grading core foundation: assessments, submission batch
+boundaries, grade records, correction requests, tenant-aware selectors, ABAC
+policies, and deterministic grading helpers. Reports, PDFs, generated remarks,
+and parent-facing delivery remain future phases.
+
 ## Active Boundary Rules
 
 The default test command runs Phase 1 through Phase 5B work and excludes Phase

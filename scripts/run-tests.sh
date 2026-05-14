@@ -3,10 +3,9 @@ set -eo pipefail
 
 MODE="${1:-unit}"
 PYTEST_CONFIG_ARGS=()
-PHASE5_MARKER_EXPRESSION="not chaos and not integration and not phase6 and not future"
-# Phase 6 grading is intentionally quarantined until its migrations are created.
-# This keeps default CI honest for Phases 1-5 without activating future models.
-PHASE4_IGNORE_ARGS=(--ignore=app/grading/tests)
+PHASE6A_MARKER_EXPRESSION="not chaos and not integration and not future"
+# Phase 6A activates grading core tests. Later grading/report phases stay
+# deferred with the future marker until their migrations and policies exist.
 PYTEST_COMMAND=(pytest)
 
 if [ "$#" -gt 0 ]; then
@@ -30,15 +29,14 @@ if command -v poetry >/dev/null 2>&1; then
 fi
 
 case "${MODE}" in
-  unit|default|phase1|phase2|phase3|phase4|phase5)
-    echo "Running Phase 5-safe pytest selection"
+  unit|default|phase1|phase2|phase3|phase4|phase5|phase6)
+    echo "Running Phase 6A-safe pytest selection"
     exec "${PYTEST_COMMAND[@]}" \
       "${PYTEST_CONFIG_ARGS[@]}" \
-      "${PHASE4_IGNORE_ARGS[@]}" \
-      -m "${PHASE5_MARKER_EXPRESSION}" \
+      -m "${PHASE6A_MARKER_EXPRESSION}" \
       "$@"
     ;;
-  phase5|phase6|future|integration)
+  phase6b|future|integration)
     echo "Running opt-in pytest marker: ${MODE}"
     exec "${PYTEST_COMMAND[@]}" "${PYTEST_CONFIG_ARGS[@]}" -m "${MODE}" "$@"
     ;;

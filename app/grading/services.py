@@ -1,93 +1,64 @@
-"""
-grading/services.py
-===================
-High-Velocity Write Engine for the Fast-Grid
-Back To Front Development
+"""Minimal Phase 6A write helpers.
 
-PERFORMANCE:
-    - Guaranteed O(1) query execution for arbitrary payload sizes.
-    - Uses `update_conflicts=True` for PostgreSQL ON CONFLICT behavior.
-
-SECURITY:
-    - Cross-Tenant IDOR protection via batch Validation against TeacherAssignments.
+These helpers are intentionally narrow.  Phase 6A validates the grading data
+model; Phase 6B will add the full batch submission service and event emission.
 """
 
-from typing import Any, Dict, List
-from uuid import UUID
+from __future__ import annotations
 
-from academics.models import Enrollment
-from django.core.exceptions import PermissionDenied, ValidationError
-from django.db import transaction
-from grading.algorithms import CBCTranslator
-from grading.models import GradeRecord
+from typing import Any
+
+from django.core.exceptions import ValidationError
+
+from academics.models import TeacherAssignment
+from grading.models import Assessment, GradeRecord, GradeSubmissionBatch
 
 
-class BatchGradeService:
-    """
-    Handles bulk grade submissions from the Fast-Grid interface.
-    """
+def build_submission_batch(
+    *,
+    tenant: Any,
+    actor: Any,
+    assessment: Assessment,
+    teacher_assignment: TeacherAssignment,
+    idempotency_key: str,
+    record_count: int = 0,
+    status: str = GradeSubmissionBatch.Status.SUBMITTED,
+) -> GradeSubmissionBatch:
+    """Create a batch with server-derived tenant/teacher/assignment context."""
 
-    @staticmethod
-    @transaction.atomic
-    def submit_fast_grid_payload(
-        teacher_user,
-        assessment_uuid: str | UUID,
-        subject_uuid: str | UUID,
-        payload_list: List[Dict[str, Any]],
-    ) -> int:
-        """
-        Processes an arbitrary number of grades in exactly 2 queries:
-            Query 1: O(1) Bulk Authorization Check
-            Query 2: O(1) Bulk Upsert (ON CONFLICT DO UPDATE)
+    if teacher_assignment.teacher_id != actor.id:
+        raise ValidationError({"teacher_assignment": "Teacher assignment is invalid."})
+    return GradeSubmissionBatch.objects.create(
+        tenant=tenant,
+        assessment=assessment,
+        teacher=actor,
+        teacher_assignment=teacher_assignment,
+        cohort=assessment.cohort,
+        learning_area=assessment.learning_area,
+        idempotency_key=idempotency_key,
+        record_count=record_count,
+        status=status,
+    )
 
-        payload_list format:
-        [{"student_uuid": "abc-123", "raw_score": 85.5, "remarks": "Excellent"}]
-        """
-        if not payload_list:
-            return 0
 
-        requested_student_ids = {str(p["student_uuid"]) for p in payload_list}
+def build_grade_record(
+    *,
+    tenant: Any,
+    actor: Any,
+    assessment: Assessment,
+    submission_batch: GradeSubmissionBatch,
+    student: Any,
+    raw_score: Any,
+    remarks: str = "",
+) -> GradeRecord:
+    """Create a grade record using authenticated actor, not client identity."""
 
-        authorized_student_ids_query = Enrollment.objects.filter(
-            student_id__in=requested_student_ids,
-            cohort__teacher_assignments__teacher=teacher_user,
-            cohort__teacher_assignments__subject_id=subject_uuid,
-        ).values_list("student_id", flat=True)
-
-        authorized_student_ids = {str(sid) for sid in authorized_student_ids_query}
-
-        unauthorized_ids = requested_student_ids - authorized_student_ids
-        if unauthorized_ids:
-            raise PermissionDenied(
-                "Teacher is not authorized to grade one or more submitted records."
-            )
-
-        records_to_upsert = []
-        for payload in payload_list:
-            try:
-                raw_score = float(payload["raw_score"])
-            except (ValueError, TypeError):
-                raise ValidationError("Invalid raw_score format.")
-
-            cbc_score = CBCTranslator.translate_percentage(raw_score)
-
-            records_to_upsert.append(
-                GradeRecord(
-                    student_id=payload["student_uuid"],
-                    subject_id=subject_uuid,
-                    assessment_id=assessment_uuid,
-                    raw_score=raw_score,
-                    cbc_score=cbc_score,
-                    remarks=payload.get("remarks", ""),
-                    version=1,
-                )
-            )
-
-        GradeRecord.objects.bulk_create(
-            records_to_upsert,
-            update_conflicts=True,
-            unique_fields=["student", "subject", "assessment"],
-            update_fields=["raw_score", "cbc_score", "remarks", "version"],
-        )
-
-        return len(records_to_upsert)
+    return GradeRecord.objects.create(
+        tenant=tenant,
+        assessment=assessment,
+        submission_batch=submission_batch,
+        student=student,
+        raw_score=raw_score,
+        remarks=remarks,
+        submitted_by=actor,
+    )
