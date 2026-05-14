@@ -55,3 +55,9 @@ per learner and assessment, score bounds, and auditable correction requests.
 RBAC grants broad capability; ABAC proves the teacher is assigned to the exact
 cohort and learning area. Grade events must carry references and counts, not raw
 marks or learner names.
+
+Phase 6A.1 adds CBE/CCT binding as a grading invariant. Draft assessments may
+be incomplete, but operational grading requires a stored published curriculum
+version, learning area, and rubric foundation. Grade-entry selectors expose only
+assigned, open, bound assessments. Grade records use the stored assessment
+context and do not call CCT source or web validation per score.

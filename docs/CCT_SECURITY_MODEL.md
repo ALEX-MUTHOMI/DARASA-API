@@ -4,6 +4,18 @@ CCT is Darasa's curriculum firewall and control tower. It records evidence about
 official curriculum and regulatory changes without becoming a crawler or an
 auto-publishing bot.
 
+## Grading Boundary
+
+CCT owns curriculum truth; grading owns assessment and academic records. An
+operational grading assessment stores references to the approved curriculum
+version, learning area, and rubric foundation. Grading validates that stored
+context and then uses it for grade records.
+
+CCT source validation, artifact quarantine, diffing, and regulatory
+classification must not run per mark or per grade record. Later CCT
+publications do not silently rebind old assessments; historical grade records
+remain tied to the assessment context used when grading began.
+
 ## Source Trust
 
 Official authorities are allowlisted by code and domain. Source URLs must use

@@ -44,14 +44,21 @@ boundaries, grade records, correction requests, tenant-aware selectors, ABAC
 policies, and deterministic grading helpers. Reports, PDFs, generated remarks,
 and parent-facing delivery remain future phases.
 
+Phase 6A.1 binds operational assessments to CBE/CCT curriculum truth. CCT owns
+official source governance and publication; grading stores the approved
+curriculum/rubric context on the assessment and preserves that historical
+context after grading begins. Teacher grade-entry paths expose only assigned,
+open, bound assessments.
+
 ## Active Boundary Rules
 
-The default test command runs Phase 1 through Phase 5B work and excludes Phase
-6, future markers, integration-heavy tests, and chaos tests.
+The default test command now includes Phase 1 through Phase 6A.1 work and
+continues to exclude future markers, integration-heavy tests, and chaos tests.
 
-The grading app remains quarantined until its own phase creates intentional
-migrations and policy tests. It must not be added back to the active Django app
-registry early.
+The grading app is intentionally active for Phase 6A and later. Future report,
+scheme, lesson-assistant, external broker, crawler, and AI-parser work remains
+inactive until its own phase creates intentional migrations, policies, and
+tests.
 
 CCT never fetches live government sites. It validates source metadata and stores
 evidence so a future ingestion layer can be reviewed separately.

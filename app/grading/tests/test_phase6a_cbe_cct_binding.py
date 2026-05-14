@@ -205,7 +205,9 @@ def test_policy_denies_unbound_or_unassigned_operational_assessment(
     )
     assert can_enter_grades(context, assessment=assessment)
 
-    Assessment.objects.filter(pk=assessment.pk).update(curriculum_binding_locked_at=None)
+    Assessment.objects.filter(pk=assessment.pk).update(
+        curriculum_binding_locked_at=None,
+    )
     assessment.refresh_from_db()
     assert not can_enter_grades(context, assessment=assessment)
     assert not can_submit_grade_batch(
@@ -242,7 +244,9 @@ def test_teacher_grade_entry_selectors_exclude_unbound_assessments(
         == assessment
     )
 
-    Assessment.objects.filter(pk=assessment.pk).update(curriculum_binding_locked_at=None)
+    Assessment.objects.filter(pk=assessment.pk).update(
+        curriculum_binding_locked_at=None,
+    )
     assert list(get_teacher_grading_contexts(actor=teacher_user, tenant=school)) == []
     assert (
         get_assessment_for_teacher(

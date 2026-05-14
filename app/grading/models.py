@@ -302,7 +302,8 @@ class Assessment(TimeStampedModel):
             raise ValidationError(
                 {
                     "curriculum_version": _(
-                        "Assessment curriculum context cannot be changed after grading begins."
+                        "Assessment curriculum context cannot be changed "
+                        "after grading begins."
                     )
                 }
             )
@@ -423,7 +424,10 @@ class GradeSubmissionBatch(TimeStampedModel):
             raise ValidationError(
                 {"idempotency_key": _("Idempotency key is required.")}
             )
-        if self.status != self.Status.DRAFT and not self.assessment.is_operationally_bound():
+        if (
+            self.status != self.Status.DRAFT
+            and not self.assessment.is_operationally_bound()
+        ):
             raise ValidationError(
                 {"assessment": _("Assessment is not open for CBE-bound grading.")}
             )

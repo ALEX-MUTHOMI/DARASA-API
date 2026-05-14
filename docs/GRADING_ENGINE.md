@@ -3,6 +3,25 @@
 Phase 6A activates the grading core foundation. It does not build the full
 teacher submission workflow, reports, PDFs, parent views, or generated remarks.
 
+## CBE/CCT Binding
+
+CCT is Darasa's curriculum truth layer. It decides which official curriculum
+version, learning area, and rubric foundation are approved and published.
+Grading consumes that stored context; it does not invent CBE rules or resolve
+official sources during mark entry.
+
+Draft assessments may be incomplete so academic teams can prepare work in
+progress. Operational assessments (`open`, `locked`, `submitted`, `approved`,
+or `archived`) must be bound to a published curriculum version, learning area,
+and rubric foundation. When an assessment becomes operational, Darasa stores a
+binding timestamp so old grade records remain tied to the assessment context
+that existed when grading began. Later CCT updates do not mutate old
+assessments or grade records.
+
+The teacher grade-entry selector returns only assigned, open, CBE/CCT-bound
+assessments. Draft management belongs on a separate future read path; it must
+not be mixed with grade entry.
+
 ## Why Grading Is Batch-Based
 
 Grades are sensitive academic records. Darasa treats a teacher submission as a
@@ -41,7 +60,8 @@ grids. Events should carry identifiers and counts only.
 
 Compilation is separate from report generation. Phase 6B can add the full batch
 submission service. Phase 6C can compile report-ready summaries. Report
-generation, PDFs, parent delivery, and generated remarks remain later phases.
+generation and PDFs belong to Phase 7. Safe NLP boundaries remain Phase 9 or
+later and cannot decide academic records.
 
 NLP or generated text must never decide grades. Human academic records remain
 database-backed, auditable, tenant-scoped, and policy-controlled.

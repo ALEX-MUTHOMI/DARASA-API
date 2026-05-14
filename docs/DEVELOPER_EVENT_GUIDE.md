@@ -43,9 +43,10 @@ See `docs/EVENT_ALGORITHMS.md` for the supported algorithm modules.
 ## Grading Event Readiness
 
 Phase 6A may define grading event contracts later, but grading payloads must
-stay compact: tenant, assessment, batch, cohort, learning area, and record
-count identifiers only. Do not put raw marks, learner names, guardian data,
-teacher private notes, report text, or raw grade grids into events.
+stay compact: tenant, assessment, batch, cohort, learning area, curriculum
+version, rubric foundation, and record count identifiers only. Do not put raw
+marks, learner names, guardian data, teacher private notes, report text, or raw
+grade grids into events.
 
 ## Ownership
 
