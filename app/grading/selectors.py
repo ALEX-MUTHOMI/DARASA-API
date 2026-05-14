@@ -57,7 +57,7 @@ def get_teacher_grading_contexts(
         queryset = queryset.filter(academic_year=academic_year)
     if term is not None:
         queryset = queryset.filter(term=term)
-    return queryset
+    return queryset.distinct()
 
 
 def get_assessment_for_teacher(
