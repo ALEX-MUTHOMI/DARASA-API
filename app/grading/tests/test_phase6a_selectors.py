@@ -17,11 +17,12 @@ pytestmark = [pytest.mark.django_db, pytest.mark.phase6]
 def test_teacher_grading_contexts_are_assignment_scoped(
     school,
     teacher_user,
+    assessment,
     teacher_assignment,
 ):
     contexts = list(get_teacher_grading_contexts(actor=teacher_user, tenant=school))
 
-    assert contexts == [teacher_assignment]
+    assert contexts == [assessment]
     assert list(get_teacher_grading_contexts(actor=teacher_user, tenant=None)) == []
 
 

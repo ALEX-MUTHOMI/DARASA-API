@@ -102,6 +102,8 @@ def can_enter_grades(context: PolicyContext, *, assessment: Assessment) -> bool:
         return False
     if assessment.status != Assessment.Status.OPEN:
         return False
+    if not assessment.is_operationally_bound():
+        return False
     return _has_assignment_for_assessment(context, assessment=assessment)
 
 
@@ -172,5 +174,7 @@ def can_view_grade_completion_summary(
     if context.action != "grading.summary.view":
         return False
     if not _in_tenant(context, assessment):
+        return False
+    if not assessment.is_operationally_bound():
         return False
     return _is_admin(context)

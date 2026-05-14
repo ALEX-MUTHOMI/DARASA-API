@@ -16,6 +16,17 @@ from academics.models import (
     Term,
 )
 from core.models import CustomUser, Role, TenantUserRole
+from curriculum.models import (
+    AssessmentRubricFoundation,
+    CurriculumAuthority,
+    CurriculumLearningArea,
+    CurriculumPublication,
+    CurriculumSourceDocument,
+    CurriculumVersion,
+    SpecificLearningOutcome,
+    Strand,
+    SubStrand,
+)
 from grading.models import Assessment
 from tenant.models import School
 
@@ -151,6 +162,94 @@ def learning_area(school, grade_level) -> LearningArea:
 
 
 @pytest.fixture
+def curriculum_authority() -> CurriculumAuthority:
+    authority, _ = CurriculumAuthority.objects.get_or_create(
+        code="kicd",
+        defaults={
+            "name": "KICD Phase 6A Fixture",
+            "official_website": "https://kicd.ac.ke",
+            "allowed_domains": ["kicd.ac.ke"],
+        },
+    )
+    return authority
+
+
+@pytest.fixture
+def curriculum_source_document(curriculum_authority) -> CurriculumSourceDocument:
+    token = _token()
+    return CurriculumSourceDocument.objects.create(
+        authority=curriculum_authority,
+        source_authority=curriculum_authority.code,
+        title=f"Senior School Curriculum {token}",
+        document_code=f"SSC-{token}",
+        source_url="https://kicd.ac.ke/curriculum-designs",
+        document_version_label=f"v-{token}",
+        checksum="fixture-checksum",
+    )
+
+
+@pytest.fixture
+def curriculum_version(curriculum_source_document) -> CurriculumVersion:
+    return CurriculumVersion.objects.create(
+        source_document=curriculum_source_document,
+        version_label=f"Version {_token()}",
+        effective_from="2026-01-01",
+    )
+
+
+@pytest.fixture
+def curriculum_publication(curriculum_version) -> CurriculumPublication:
+    return CurriculumPublication.objects.create(
+        curriculum_version=curriculum_version,
+        effective_from="2026-01-01",
+        publication_notes="Approved official curriculum fixture.",
+    )
+
+
+@pytest.fixture
+def curriculum_learning_area(
+    curriculum_version,
+    grade_level,
+    learning_area,
+) -> CurriculumLearningArea:
+    return CurriculumLearningArea.objects.create(
+        curriculum_version=curriculum_version,
+        grade_level=grade_level,
+        learning_area=learning_area,
+        official_name="Computer Studies",
+        official_code=f"cs-{_token()}",
+    )
+
+
+@pytest.fixture
+def curriculum_rubric_foundation(
+    curriculum_learning_area,
+) -> AssessmentRubricFoundation:
+    strand = Strand.objects.create(
+        curriculum_learning_area=curriculum_learning_area,
+        title=f"Computing Systems {_token()}",
+        sequence_order=1,
+    )
+    sub_strand = SubStrand.objects.create(
+        strand=strand,
+        title=f"Programming {_token()}",
+        sequence_order=1,
+    )
+    outcome = SpecificLearningOutcome.objects.create(
+        sub_strand=sub_strand,
+        text=f"Apply programming concepts {_token()}",
+        sequence_order=1,
+    )
+    return AssessmentRubricFoundation.objects.create(
+        learning_outcome=outcome,
+        level_code=f"meets-{_token()}",
+        level_label="Meets expectation",
+        descriptor="Demonstrates the assessed competency.",
+        sequence_order=1,
+    )
+
+
+@pytest.fixture
 def other_learning_area(other_school, grade_level) -> LearningArea:
     return LearningArea.objects.create(
         tenant=other_school,
@@ -168,6 +267,9 @@ def assessment(
     grade_level,
     cohort,
     learning_area,
+    curriculum_version,
+    curriculum_publication,
+    curriculum_rubric_foundation,
     principal_user,
 ) -> Assessment:
     return Assessment.objects.create(
@@ -177,6 +279,8 @@ def assessment(
         grade_level=grade_level,
         cohort=cohort,
         learning_area=learning_area,
+        curriculum_version=curriculum_version,
+        rubric_foundation=curriculum_rubric_foundation,
         title=f"Assessment {_token()}",
         max_score=Decimal("100.00"),
         status=Assessment.Status.OPEN,

@@ -3,6 +3,8 @@
 Grades are sensitive academic records.  The models enforce tenant consistency,
 teacher assignment context, score bounds, and auditable correction requests
 before later phases add submission workflows or compiled academic summaries.
+Operational assessments are also bound to CCT curriculum context so grading
+cannot drift into an isolated marks table.
 """
 
 from __future__ import annotations
@@ -29,8 +31,24 @@ from academics.models import (
     TeacherAssignment,
     Term,
 )
+from grading.algorithms.assessment_lifecycle import (
+    changed_curriculum_context_fields,
+    curriculum_context_mutation_allowed,
+)
+from grading.algorithms.curriculum_binding import (
+    assessment_status_requires_binding,
+    validate_curriculum_binding,
+)
 from grading.algorithms.score_bounds import validate_score_bounds
 from tenant.models import School, TimeStampedModel
+
+
+def _related_tenant_id(instance: Any, attribute: str) -> Any:
+    try:
+        related = getattr(instance, attribute)
+    except (AttributeError, instance.__class__.DoesNotExist):
+        return None
+    return getattr(related, "tenant_id", None)
 
 
 class Assessment(TimeStampedModel):
@@ -120,6 +138,7 @@ class Assessment(TimeStampedModel):
         blank=True,
         related_name="created_assessments",
     )
+    curriculum_binding_locked_at = models.DateTimeField(null=True, blank=True)
 
     class Meta(TimeStampedModel.Meta):
         indexes = [
@@ -146,10 +165,10 @@ class Assessment(TimeStampedModel):
             self.title = self.title.strip()
         validate_score_bounds(score=0, max_score=self.max_score)
         related_tenants = [
-            getattr(self.academic_year, "tenant_id", None),
-            getattr(self.term, "tenant_id", None),
-            getattr(self.cohort, "tenant_id", None),
-            getattr(self.learning_area, "tenant_id", None),
+            _related_tenant_id(self, "academic_year"),
+            _related_tenant_id(self, "term"),
+            _related_tenant_id(self, "cohort"),
+            _related_tenant_id(self, "learning_area"),
         ]
         if self.tenant_id and any(value != self.tenant_id for value in related_tenants):
             raise ValidationError({"tenant": _("Assessment tenant is invalid.")})
@@ -160,10 +179,133 @@ class Assessment(TimeStampedModel):
                 )
         if self.opens_at and self.closes_at and self.opens_at >= self.closes_at:
             raise ValidationError({"closes_at": _("Close time must follow open time.")})
+        self._validate_curriculum_binding_for_status()
+        self._validate_curriculum_context_immutability()
 
     def save(self, *args: Any, **kwargs: Any) -> Any:
         self.full_clean()
+        if (
+            assessment_status_requires_binding(self.status)
+            and self.curriculum_binding_locked_at is None
+        ):
+            # This timestamp records the curriculum snapshot used when the
+            # assessment became operational.  It is not a school activation.
+            self.curriculum_binding_locked_at = timezone.now()
         return super().save(*args, **kwargs)
+
+    def is_operationally_bound(self) -> bool:
+        """Return whether the stored assessment context is safe for grading.
+
+        Policies and selectors use this cheap persisted check instead of
+        asking CCT to resolve curriculum truth for every score.
+        """
+
+        if not assessment_status_requires_binding(self.status):
+            return False
+        return validate_curriculum_binding(
+            status=self.status,
+            curriculum_version_id=self.curriculum_version_id,
+            learning_area_id=self.learning_area_id,
+            rubric_foundation_id=self.rubric_foundation_id,
+            curriculum_version_is_active=True,
+            has_active_publication=True,
+            rubric_matches_context=self._rubric_matches_assessment_context(),
+            require_locked_binding=True,
+            binding_locked=self.curriculum_binding_locked_at is not None,
+        ).is_bound
+
+    def _validate_curriculum_binding_for_status(self) -> None:
+        if not assessment_status_requires_binding(self.status):
+            return
+        result = validate_curriculum_binding(
+            status=self.status,
+            curriculum_version_id=self.curriculum_version_id,
+            learning_area_id=self.learning_area_id,
+            rubric_foundation_id=self.rubric_foundation_id,
+            curriculum_version_is_active=bool(
+                getattr(self.curriculum_version, "is_active", False)
+            ),
+            has_active_publication=self._has_active_curriculum_publication(),
+            rubric_matches_context=self._rubric_matches_assessment_context(),
+        )
+        if not result.is_bound:
+            raise ValidationError(
+                {"curriculum_version": _("Assessment curriculum binding is invalid.")}
+            )
+
+    def _has_active_curriculum_publication(self) -> bool:
+        if self.curriculum_version_id is None:
+            return False
+        from curriculum.models import CurriculumPublication
+
+        return CurriculumPublication.objects.filter(
+            curriculum_version_id=self.curriculum_version_id,
+            is_active=True,
+        ).exists()
+
+    def _rubric_matches_assessment_context(self) -> bool:
+        if (
+            self.rubric_foundation_id is None
+            or self.curriculum_version_id is None
+            or self.learning_area_id is None
+        ):
+            return False
+        rubric = self.rubric_foundation
+        if not getattr(rubric, "is_active", False):
+            return False
+        sub_strand = getattr(rubric, "sub_strand", None)
+        outcome = getattr(rubric, "learning_outcome", None)
+        if outcome is not None:
+            sub_strand = outcome.sub_strand
+        if sub_strand is None:
+            return False
+        curriculum_learning_area = sub_strand.strand.curriculum_learning_area
+        return (
+            curriculum_learning_area.curriculum_version_id
+            == self.curriculum_version_id
+            and curriculum_learning_area.learning_area_id == self.learning_area_id
+        )
+
+    def _validate_curriculum_context_immutability(self) -> None:
+        if self.pk is None:
+            return
+        original = (
+            Assessment.objects.filter(pk=self.pk)
+            .values("curriculum_version_id", "learning_area_id", "rubric_foundation_id")
+            .first()
+        )
+        if original is None:
+            return
+        changed_fields = changed_curriculum_context_fields(
+            old_values={
+                "curriculum_version": original["curriculum_version_id"],
+                "learning_area": original["learning_area_id"],
+                "rubric_foundation": original["rubric_foundation_id"],
+            },
+            new_values={
+                "curriculum_version": self.curriculum_version_id,
+                "learning_area": self.learning_area_id,
+                "rubric_foundation": self.rubric_foundation_id,
+            },
+        )
+        if not changed_fields:
+            return
+        has_submitted_batches = self.submission_batches.exclude(
+            status=GradeSubmissionBatch.Status.DRAFT,
+        ).exists()
+        has_grade_records = self.grade_records.exists()
+        if not curriculum_context_mutation_allowed(
+            changed_fields=changed_fields,
+            has_submitted_batches=has_submitted_batches,
+            has_grade_records=has_grade_records,
+        ):
+            raise ValidationError(
+                {
+                    "curriculum_version": _(
+                        "Assessment curriculum context cannot be changed after grading begins."
+                    )
+                }
+            )
 
     def __str__(self) -> str:
         return f"Assessment {self.pk}"
@@ -280,6 +422,10 @@ class GradeSubmissionBatch(TimeStampedModel):
         if self.status != self.Status.DRAFT and not self.idempotency_key.strip():
             raise ValidationError(
                 {"idempotency_key": _("Idempotency key is required.")}
+            )
+        if self.status != self.Status.DRAFT and not self.assessment.is_operationally_bound():
+            raise ValidationError(
+                {"assessment": _("Assessment is not open for CBE-bound grading.")}
             )
 
     def save(self, *args: Any, **kwargs: Any) -> Any:

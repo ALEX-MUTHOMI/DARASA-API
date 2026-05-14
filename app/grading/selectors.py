@@ -8,7 +8,6 @@ from uuid import UUID
 from django.db import models
 from django.db.models import QuerySet
 
-from academics.models import TeacherAssignment
 from grading.models import (
     Assessment,
     GradeCorrectionRequest,
@@ -30,16 +29,30 @@ def get_teacher_grading_contexts(
     tenant: Any,
     academic_year: Any | None = None,
     term: Any | None = None,
-) -> QuerySet[TeacherAssignment]:
+) -> QuerySet[Assessment]:
     if actor is None or tenant is None:
-        return TeacherAssignment.objects.none()
-    queryset = TeacherAssignment.objects.filter(
+        return Assessment.objects.none()
+    queryset = Assessment.objects.filter(
         tenant=tenant,
-        teacher=actor,
-        is_active=True,
+        status=Assessment.Status.OPEN,
+        curriculum_version__isnull=False,
+        rubric_foundation__isnull=False,
+        curriculum_binding_locked_at__isnull=False,
         cohort__is_active=True,
         learning_area__is_active=True,
-    ).select_related("cohort", "learning_area", "academic_year", "term")
+        cohort__teacher_assignments__teacher=actor,
+        cohort__teacher_assignments__learning_area=models.F("learning_area"),
+        cohort__teacher_assignments__academic_year=models.F("academic_year"),
+        cohort__teacher_assignments__term=models.F("term"),
+        cohort__teacher_assignments__is_active=True,
+    ).select_related(
+        "cohort",
+        "learning_area",
+        "academic_year",
+        "term",
+        "curriculum_version",
+        "rubric_foundation",
+    )
     if academic_year is not None:
         queryset = queryset.filter(academic_year=academic_year)
     if term is not None:
@@ -60,11 +73,24 @@ def get_assessment_for_teacher(
         Assessment.objects.filter(
             id=assessment_uuid,
             tenant=tenant,
+            status=Assessment.Status.OPEN,
+            curriculum_version__isnull=False,
+            rubric_foundation__isnull=False,
+            curriculum_binding_locked_at__isnull=False,
             cohort__teacher_assignments__teacher=actor,
             cohort__teacher_assignments__learning_area=models.F("learning_area"),
+            cohort__teacher_assignments__academic_year=models.F("academic_year"),
+            cohort__teacher_assignments__term=models.F("term"),
             cohort__teacher_assignments__is_active=True,
         )
-        .select_related("cohort", "learning_area", "academic_year", "term")
+        .select_related(
+            "cohort",
+            "learning_area",
+            "academic_year",
+            "term",
+            "curriculum_version",
+            "rubric_foundation",
+        )
         .first()
     )
 
