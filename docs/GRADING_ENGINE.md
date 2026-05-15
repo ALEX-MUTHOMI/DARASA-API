@@ -46,6 +46,13 @@ Slow-network retries use idempotency keys and payload hashes. Stale draft
 versions are rejected so two browser sessions cannot silently overwrite newer
 work.
 
+Drafts are sensitive because they can contain provisional marks. They are owned
+by one tenant, teacher, and assessment, and are never official `GradeRecord`
+rows until final submission succeeds. They must not appear in events. Before
+production, Darasa needs an explicit draft retention policy that expires or
+archives abandoned drafts by tenant, assessment, and age; only the owning
+teacher or a future explicitly authorized reviewer workflow may inspect them.
+
 Practical and CBE-style assessments can define `AssessmentComponent` rows for
 component columns. Component scores are validated against component maximums and
 the assessment maximum. Phase 6B does not compile final summaries.

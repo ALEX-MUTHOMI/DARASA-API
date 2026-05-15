@@ -65,4 +65,7 @@ context and do not call CCT source or web validation per score.
 Phase 6B adds teacher workflow safeguards: draft rows are editable but not
 official records, final submission requires step-up confirmation, idempotency
 keys prevent duplicate retries, payload hashes prevent same-key mutation, and
-one compact event is emitted per submitted batch after commit.
+one compact event is emitted per submitted batch after commit. Draft retention
+is a production-readiness requirement: abandoned drafts must be expired or
+archived by tenant, assessment, and age before schools rely on the workflow at
+scale.

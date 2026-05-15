@@ -249,6 +249,13 @@ def save_grade_draft(
         idempotency_key=key,
     ).first()
     if existing_by_key is not None:
+        if (
+            existing_by_key.assessment_id != assessment.id
+            or existing_by_key.teacher_id != actor.id
+        ):
+            raise ValidationError(
+                {"idempotency_key": "Idempotency key belongs to another context."}
+            )
         ensure_same_payload(
             existing_hash=existing_by_key.payload_hash,
             new_hash=row_payload_hash,
@@ -408,6 +415,10 @@ def submit_grade_batch(
         ],
     ).first()
     if existing is not None:
+        if existing.assessment_id != assessment.id or existing.teacher_id != actor.id:
+            raise ValidationError(
+                {"idempotency_key": "Idempotency key belongs to another context."}
+            )
         ensure_same_payload(
             existing_hash=existing.payload_hash,
             new_hash=row_payload_hash,
