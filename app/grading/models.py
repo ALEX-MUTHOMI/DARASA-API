@@ -312,6 +312,73 @@ class Assessment(TimeStampedModel):
         return f"Assessment {self.pk}"
 
 
+class AssessmentComponent(TimeStampedModel):
+    """Optional component columns for practical or rubric-based grade grids."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    tenant = models.ForeignKey(
+        School,
+        on_delete=models.CASCADE,
+        related_name="assessment_components",
+    )
+    assessment = models.ForeignKey(
+        Assessment,
+        on_delete=models.CASCADE,
+        related_name="components",
+    )
+    name = models.CharField(max_length=120)
+    description = models.TextField(blank=True)
+    max_score = models.DecimalField(max_digits=7, decimal_places=2)
+    order = models.PositiveIntegerField(default=1)
+    is_required = models.BooleanField(default=True)
+    rubric_foundation = models.ForeignKey(
+        "curriculum.AssessmentRubricFoundation",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="assessment_components",
+    )
+
+    class Meta(TimeStampedModel.Meta):
+        constraints = [
+            models.UniqueConstraint(
+                fields=["tenant", "assessment", "name"],
+                name="grading_component_name_unique",
+            ),
+            models.CheckConstraint(
+                condition=Q(max_score__gt=0),
+                name="grading_component_max_score_positive",
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=["tenant", "assessment", "order"],
+                name="grading_component_order_idx",
+            ),
+        ]
+
+    def clean(self) -> None:
+        super().clean()
+        if self.name:
+            self.name = self.name.strip()
+        if not self.name:
+            raise ValidationError({"name": _("Component name is required.")})
+        validate_score_bounds(score=0, max_score=self.max_score)
+        if self.tenant_id and self.assessment_id:
+            if self.assessment.tenant_id != self.tenant_id:
+                raise ValidationError({"tenant": _("Component tenant is invalid.")})
+        if self.rubric_foundation_id and self.assessment_id:
+            if self.rubric_foundation_id != self.assessment.rubric_foundation_id:
+                raise ValidationError({"rubric_foundation": _("Rubric is invalid.")})
+
+    def save(self, *args: Any, **kwargs: Any) -> Any:
+        self.full_clean()
+        return super().save(*args, **kwargs)
+
+    def __str__(self) -> str:
+        return f"AssessmentComponent {self.pk}"
+
+
 class GradeSubmissionBatch(TimeStampedModel):
     class Status(models.TextChoices):
         DRAFT = "draft", _("Draft")
@@ -354,6 +421,7 @@ class GradeSubmissionBatch(TimeStampedModel):
         related_name="grade_batches",
     )
     idempotency_key = models.CharField(max_length=180, blank=True)
+    payload_hash = models.CharField(max_length=96, blank=True)
     record_count = models.PositiveIntegerField(default=0)
     status = models.CharField(
         max_length=32,
@@ -364,6 +432,9 @@ class GradeSubmissionBatch(TimeStampedModel):
     submitted_at = models.DateTimeField(null=True, blank=True)
     validated_at = models.DateTimeField(null=True, blank=True)
     compiled_at = models.DateTimeField(null=True, blank=True)
+    confirmation_method = models.CharField(max_length=32, blank=True)
+    confirmation_at = models.DateTimeField(null=True, blank=True)
+    confirmation_reference = models.CharField(max_length=128, blank=True)
 
     class Meta(TimeStampedModel.Meta):
         indexes = [
@@ -424,6 +495,8 @@ class GradeSubmissionBatch(TimeStampedModel):
             raise ValidationError(
                 {"idempotency_key": _("Idempotency key is required.")}
             )
+        if self.status != self.Status.DRAFT and not self.payload_hash.strip():
+            raise ValidationError({"payload_hash": _("Payload hash is required.")})
         if (
             self.status != self.Status.DRAFT
             and not self.assessment.is_operationally_bound()
@@ -431,6 +504,23 @@ class GradeSubmissionBatch(TimeStampedModel):
             raise ValidationError(
                 {"assessment": _("Assessment is not open for CBE-bound grading.")}
             )
+        if self.status != self.Status.DRAFT:
+            if not self.confirmation_method.strip():
+                raise ValidationError(
+                    {"confirmation_method": _("Confirmation method is required.")}
+                )
+            if self.confirmation_at is None:
+                raise ValidationError(
+                    {"confirmation_at": _("Confirmation time is required.")}
+                )
+            if not self.confirmation_reference.strip():
+                raise ValidationError(
+                    {
+                        "confirmation_reference": _(
+                            "Confirmation reference is required."
+                        )
+                    }
+                )
 
     def save(self, *args: Any, **kwargs: Any) -> Any:
         self.full_clean()
@@ -438,6 +528,188 @@ class GradeSubmissionBatch(TimeStampedModel):
 
     def __str__(self) -> str:
         return f"GradeSubmissionBatch {self.pk}"
+
+
+class GradeDraftBatch(TimeStampedModel):
+    class Status(models.TextChoices):
+        DRAFT = "draft", _("Draft")
+        SUBMITTED = "submitted", _("Submitted")
+        DISCARDED = "discarded", _("Discarded")
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    tenant = models.ForeignKey(
+        School,
+        on_delete=models.CASCADE,
+        related_name="grade_draft_batches",
+    )
+    assessment = models.ForeignKey(
+        Assessment,
+        on_delete=models.PROTECT,
+        related_name="draft_batches",
+    )
+    teacher = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="grade_draft_batches",
+    )
+    teacher_assignment = models.ForeignKey(
+        TeacherAssignment,
+        on_delete=models.PROTECT,
+        related_name="grade_draft_batches",
+    )
+    cohort = models.ForeignKey(
+        Cohort,
+        on_delete=models.PROTECT,
+        related_name="grade_draft_batches",
+    )
+    learning_area = models.ForeignKey(
+        LearningArea,
+        on_delete=models.PROTECT,
+        related_name="grade_draft_batches",
+    )
+    idempotency_key = models.CharField(max_length=180, blank=True)
+    payload_hash = models.CharField(max_length=96, blank=True)
+    version = models.PositiveIntegerField(default=1)
+    status = models.CharField(
+        max_length=32,
+        choices=Status.choices,
+        default=Status.DRAFT,
+        db_index=True,
+    )
+
+    class Meta(TimeStampedModel.Meta):
+        constraints = [
+            models.UniqueConstraint(
+                fields=["tenant", "assessment", "teacher"],
+                condition=Q(status="draft"),
+                name="grading_one_active_draft_unique",
+            ),
+            models.UniqueConstraint(
+                fields=["tenant", "idempotency_key"],
+                condition=~Q(idempotency_key=""),
+                name="grading_draft_idempotency_unique",
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=["tenant", "assessment", "teacher", "status"],
+                name="grading_draft_lookup_idx",
+            ),
+        ]
+
+    def clean(self) -> None:
+        super().clean()
+        related_tenants = [
+            getattr(self.assessment, "tenant_id", None),
+            getattr(self.teacher_assignment, "tenant_id", None),
+            getattr(self.cohort, "tenant_id", None),
+            getattr(self.learning_area, "tenant_id", None),
+        ]
+        if self.tenant_id and any(value != self.tenant_id for value in related_tenants):
+            raise ValidationError({"tenant": _("Grade draft tenant is invalid.")})
+        if self.assessment_id:
+            if self.assessment.cohort_id != self.cohort_id:
+                raise ValidationError({"cohort": _("Grade draft cohort is invalid.")})
+            if self.assessment.learning_area_id != self.learning_area_id:
+                raise ValidationError(
+                    {"learning_area": _("Grade draft area is invalid.")}
+                )
+        if self.teacher_assignment_id:
+            assignment = self.teacher_assignment
+            if assignment.teacher_id != self.teacher_id:
+                raise ValidationError({"teacher": _("Grade draft teacher is invalid.")})
+            if assignment.cohort_id != self.cohort_id:
+                raise ValidationError({"cohort": _("Teacher assignment is invalid.")})
+            if assignment.learning_area_id != self.learning_area_id:
+                raise ValidationError(
+                    {"learning_area": _("Teacher assignment is invalid.")}
+                )
+            if not assignment.is_active:
+                raise ValidationError(
+                    {"teacher_assignment": _("Teacher assignment is inactive.")}
+                )
+        if self.version < 1:
+            raise ValidationError({"version": _("Draft version is invalid.")})
+
+    def save(self, *args: Any, **kwargs: Any) -> Any:
+        self.full_clean()
+        return super().save(*args, **kwargs)
+
+    def __str__(self) -> str:
+        return f"GradeDraftBatch {self.pk}"
+
+
+class GradeDraftRow(TimeStampedModel):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    tenant = models.ForeignKey(
+        School,
+        on_delete=models.CASCADE,
+        related_name="grade_draft_rows",
+    )
+    draft_batch = models.ForeignKey(
+        GradeDraftBatch,
+        on_delete=models.CASCADE,
+        related_name="rows",
+    )
+    student = models.ForeignKey(
+        Student,
+        on_delete=models.PROTECT,
+        related_name="grade_draft_rows",
+    )
+    raw_score = models.DecimalField(
+        max_digits=7,
+        decimal_places=2,
+        null=True,
+        blank=True,
+    )
+    component_scores = models.JSONField(default=dict, blank=True)
+    remarks = models.TextField(blank=True)
+    row_version = models.PositiveIntegerField(default=1)
+
+    class Meta(TimeStampedModel.Meta):
+        constraints = [
+            models.UniqueConstraint(
+                fields=["draft_batch", "student"],
+                name="grading_draft_row_student_unique",
+            ),
+            models.CheckConstraint(
+                condition=Q(raw_score__gte=0) | Q(raw_score__isnull=True),
+                name="grading_draft_row_score_non_negative",
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=["tenant", "draft_batch"],
+                name="grading_draft_row_batch_idx",
+            ),
+        ]
+
+    def clean(self) -> None:
+        super().clean()
+        if self.tenant_id and self.draft_batch_id:
+            if self.draft_batch.tenant_id != self.tenant_id:
+                raise ValidationError({"tenant": _("Draft row tenant is invalid.")})
+        if self.student_id and self.draft_batch_id:
+            if self.student.tenant_id != self.tenant_id:
+                raise ValidationError({"student": _("Draft row student is invalid.")})
+        if self.raw_score is not None:
+            validate_score_bounds(
+                score=self.raw_score,
+                max_score=self.draft_batch.assessment.max_score,
+            )
+        if not isinstance(self.component_scores, dict):
+            raise ValidationError(
+                {"component_scores": _("Component scores must be an object.")}
+            )
+        if self.row_version < 1:
+            raise ValidationError({"row_version": _("Row version is invalid.")})
+
+    def save(self, *args: Any, **kwargs: Any) -> Any:
+        self.full_clean()
+        return super().save(*args, **kwargs)
+
+    def __str__(self) -> str:
+        return f"GradeDraftRow {self.pk}"
 
 
 class GradeRecord(TimeStampedModel):
@@ -470,6 +742,7 @@ class GradeRecord(TimeStampedModel):
         blank=True,
     )
     rubric_level = models.CharField(max_length=32, blank=True)
+    component_scores = models.JSONField(default=dict, blank=True)
     remarks = models.TextField(blank=True)
     version = models.PositiveIntegerField(default=1)
     submitted_by = models.ForeignKey(
@@ -537,6 +810,10 @@ class GradeRecord(TimeStampedModel):
                 raise ValidationError(
                     {"student": _("Grade record student is invalid.")}
                 )
+        if not isinstance(self.component_scores, dict):
+            raise ValidationError(
+                {"component_scores": _("Component scores must be an object.")}
+            )
 
     def save(self, *args: Any, **kwargs: Any) -> Any:
         self.full_clean()

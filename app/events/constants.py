@@ -122,4 +122,26 @@ INITIAL_EVENT_CONTRACTS = [
         "payload_schema": {"required": ["acknowledgement_id"]},
         "priority": "normal",
     },
+    {
+        "event_type": "grading.batch_submitted",
+        "event_version": 1,
+        "description": "A teacher submitted one CBE-bound grading batch.",
+        "source_module": "grading",
+        "allowed_producers": ["grading"],
+        "allowed_consumers": ["audit"],
+        "requires_tenant": True,
+        "payload_schema": {
+            "required": [
+                "tenant_id",
+                "assessment_id",
+                "batch_id",
+                "cohort_id",
+                "learning_area_id",
+                "curriculum_version_id",
+                "record_count",
+                "submitted_at",
+            ]
+        },
+        "priority": "normal",
+    },
 ]

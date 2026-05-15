@@ -61,3 +61,8 @@ be incomplete, but operational grading requires a stored published curriculum
 version, learning area, and rubric foundation. Grade-entry selectors expose only
 assigned, open, bound assessments. Grade records use the stored assessment
 context and do not call CCT source or web validation per score.
+
+Phase 6B adds teacher workflow safeguards: draft rows are editable but not
+official records, final submission requires step-up confirmation, idempotency
+keys prevent duplicate retries, payload hashes prevent same-key mutation, and
+one compact event is emitted per submitted batch after commit.

@@ -10,6 +10,7 @@ from django.db.models import QuerySet
 
 from grading.models import (
     Assessment,
+    GradeDraftBatch,
     GradeCorrectionRequest,
     GradeRecord,
     GradeSubmissionBatch,
@@ -131,6 +132,86 @@ def get_submission_batches_for_assessment(
         tenant=tenant,
         assessment=assessment,
     ).select_related("teacher", "teacher_assignment", "cohort", "learning_area")
+
+
+def get_grade_grid_context(
+    *,
+    actor: Any,
+    tenant: Any,
+    assessment_id: Any,
+) -> Assessment | None:
+    return get_assessment_for_teacher(
+        actor=actor,
+        tenant=tenant,
+        assessment_id=assessment_id,
+    )
+
+
+def get_roster_for_assessment(*, tenant: Any, assessment: Assessment) -> QuerySet[Any]:
+    if tenant is None or assessment is None or assessment.tenant_id != tenant.id:
+        from academics.models import Student
+
+        return Student.objects.none()
+    from academics.models import Student
+
+    return (
+        Student.objects.filter(
+            tenant=tenant,
+            enrollments__tenant=tenant,
+            enrollments__cohort=assessment.cohort,
+            enrollments__academic_year=assessment.academic_year,
+            enrollments__term=assessment.term,
+            enrollments__is_active=True,
+            is_active=True,
+        )
+        .order_by("admission_number", "last_name", "first_name", "id")
+        .distinct()
+    )
+
+
+def get_existing_draft_for_teacher(
+    *,
+    actor: Any,
+    tenant: Any,
+    assessment: Assessment,
+) -> GradeDraftBatch | None:
+    if actor is None or tenant is None or assessment is None:
+        return None
+    return (
+        GradeDraftBatch.objects.filter(
+            tenant=tenant,
+            assessment=assessment,
+            teacher=actor,
+            status=GradeDraftBatch.Status.DRAFT,
+        )
+        .select_related("assessment", "teacher_assignment", "cohort", "learning_area")
+        .prefetch_related("rows")
+        .first()
+    )
+
+
+def get_existing_submission_for_assessment(
+    *,
+    actor: Any,
+    tenant: Any,
+    assessment: Assessment,
+) -> GradeSubmissionBatch | None:
+    if actor is None or tenant is None or assessment is None:
+        return None
+    return (
+        GradeSubmissionBatch.objects.filter(
+            tenant=tenant,
+            assessment=assessment,
+            teacher=actor,
+            status__in=[
+                GradeSubmissionBatch.Status.SUBMITTED,
+                GradeSubmissionBatch.Status.VALIDATED,
+                GradeSubmissionBatch.Status.COMPILED,
+            ],
+        )
+        .select_related("assessment", "teacher_assignment", "cohort", "learning_area")
+        .first()
+    )
 
 
 def get_pending_corrections_for_reviewer(

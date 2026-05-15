@@ -29,6 +29,27 @@ batch so future services can validate roster membership, teacher assignment,
 assessment status, record count, idempotency, and audit evidence once per
 submission instead of emitting one event per score.
 
+## Phase 6B Grade Grid Workflow
+
+Phase 6B adds the backend contract for the teacher-facing marksheet:
+
+1. `get_my_grading_work` returns assigned, open, CBE/CCT-bound assessments only.
+2. `build_grade_grid` returns structured metadata, roster rows, draft values,
+   submitted values, validation rules, and component columns. It is not HTML.
+3. `save_grade_draft` stores editable teacher-owned drafts. Drafts are not
+   official grade records.
+4. `submit_grade_batch` requires step-up confirmation, validates the roster and
+   score bounds, commits official `GradeRecord` rows transactionally, and emits
+   one compact batch-level event after commit.
+
+Slow-network retries use idempotency keys and payload hashes. Stale draft
+versions are rejected so two browser sessions cannot silently overwrite newer
+work.
+
+Practical and CBE-style assessments can define `AssessmentComponent` rows for
+component columns. Component scores are validated against component maximums and
+the assessment maximum. Phase 6B does not compile final summaries.
+
 ## ABAC, Not RBAC Only
 
 A role such as subject teacher is not enough. The backend must also prove the
@@ -52,16 +73,17 @@ grade records automatically from correction requests.
 
 ## Event Safety
 
-Future grading events must be compact facts and must not contain raw marks,
-learner names, guardian data, private teacher notes, full reports, or raw grade
-grids. Events should carry identifiers and counts only.
+Phase 6B emits `grading.batch_submitted` only after a successful transaction.
+The event is one fact per batch, not one event per learner. It carries
+identifiers, record count, and submission time only. It must not contain raw
+marks, component scores, learner names, guardian data, private teacher notes,
+full reports, or raw grade grids.
 
 ## Phase Boundaries
 
-Compilation is separate from report generation. Phase 6B can add the full batch
-submission service. Phase 6C can compile report-ready summaries. Report
-generation and PDFs belong to Phase 7. Safe NLP boundaries remain Phase 9 or
-later and cannot decide academic records.
+Compilation is separate from report generation. Phase 6C can compile
+report-ready summaries. Report generation and PDFs belong to Phase 7. Safe NLP
+boundaries remain Phase 9 or later and cannot decide academic records.
 
 NLP or generated text must never decide grades. Human academic records remain
 database-backed, auditable, tenant-scoped, and policy-controlled.

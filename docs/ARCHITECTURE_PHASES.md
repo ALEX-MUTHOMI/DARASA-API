@@ -50,9 +50,14 @@ curriculum/rubric context on the assessment and preserves that historical
 context after grading begins. Teacher grade-entry paths expose only assigned,
 open, bound assessments.
 
+Phase 6B adds the backend teacher grading workflow: assigned work list,
+spreadsheet grid contract, draft save/resume, practical/component grid support,
+step-up-confirmed final submission, transactional grade-record commits, and one
+compact batch-level event. It still does not compile report summaries.
+
 ## Active Boundary Rules
 
-The default test command now includes Phase 1 through Phase 6A.1 work and
+The default test command now includes Phase 1 through Phase 6B work and
 continues to exclude future markers, integration-heavy tests, and chaos tests.
 
 The grading app is intentionally active for Phase 6A and later. Future report,
