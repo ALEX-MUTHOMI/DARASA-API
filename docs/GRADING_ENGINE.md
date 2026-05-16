@@ -98,7 +98,9 @@ Role-aware projections are views over the same compiled facts. Teacher, HOD,
 deputy/head, principal, and future parent-safe projections may filter and shape
 data, but they must not create separate academic truth. Future parent
 projection foundations are learner-specific and exclude drafts, internal review
-notes, unapproved corrections, and school-wide analytics.
+notes, unapproved corrections, and school-wide analytics. Until an explicit
+guardian-learner relationship model exists, parent projections fail closed even
+for users with a guardian role.
 
 ## Phase Boundaries
 

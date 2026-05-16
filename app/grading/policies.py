@@ -194,7 +194,16 @@ def can_compile_assessment(context: PolicyContext, *, assessment: Assessment) ->
         return False
     if not assessment.is_operationally_bound():
         return False
-    return _is_admin(context)
+    if not _context_is_valid(context):
+        return False
+    if context.role.code in {
+        Role.RoleCode.PRINCIPAL.value,
+        Role.RoleCode.SCHOOL_ADMIN.value,
+    }:
+        return True
+    if context.role.code == Role.RoleCode.HOD.value:
+        return _has_assignment_for_assessment(context, assessment=assessment)
+    return False
 
 
 def can_view_teacher_compilation(
@@ -212,7 +221,9 @@ def can_view_hod_compilation(context: PolicyContext, *, assessment: Assessment) 
         return False
     if not _in_tenant(context, assessment):
         return False
-    return _context_is_valid(context) and context.role.code == Role.RoleCode.HOD.value
+    if not _context_is_valid(context) or context.role.code != Role.RoleCode.HOD.value:
+        return False
+    return _has_assignment_for_assessment(context, assessment=assessment)
 
 
 def can_view_deputy_academics_compilation(
@@ -247,8 +258,10 @@ def can_view_principal_compilation(
 
 
 def can_view_future_parent_projection(context: PolicyContext, *, tenant: Any) -> bool:
+    """Fail closed until an explicit guardian-learner mapping exists."""
+
     if context.action != "grading.compilation.future_parent.view":
         return False
     if context.tenant != tenant:
         return False
-    return _context_is_valid(context) and context.role.code == Role.RoleCode.GUARDIAN
+    return False

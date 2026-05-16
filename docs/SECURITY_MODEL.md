@@ -74,4 +74,6 @@ Phase 6C compiles official submitted records into canonical snapshots and
 role-aware projections. Compilation does not generate reports, PDFs, parent
 portal responses, or NLP text. Projections must derive from the same compiled
 facts and remain tenant/policy scoped; they may filter and shape data, but they
-must not recalculate academic meaning per role.
+must not recalculate academic meaning per role. HOD compilation visibility is
+assignment-scoped until a department ownership model exists. Future parent
+projection remains fail-closed until guardian-learner mapping is modeled.

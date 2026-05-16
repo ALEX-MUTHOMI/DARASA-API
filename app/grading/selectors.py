@@ -359,11 +359,21 @@ def get_hod_compilation_scope(
 ) -> QuerySet[CompiledCohortSummary]:
     if actor is None or tenant is None:
         return CompiledCohortSummary.objects.none()
-    queryset = get_compiled_cohort_summary(tenant=tenant)
+    queryset = get_compiled_cohort_summary(tenant=tenant).filter(
+        assessment__cohort__teacher_assignments__teacher=actor,
+        assessment__cohort__teacher_assignments__learning_area=models.F(
+            "assessment__learning_area"
+        ),
+        assessment__cohort__teacher_assignments__academic_year=models.F(
+            "assessment__academic_year"
+        ),
+        assessment__cohort__teacher_assignments__term=models.F("assessment__term"),
+        assessment__cohort__teacher_assignments__is_active=True,
+    )
     learning_area_id = (filters or {}).get("learning_area_id")
     if learning_area_id is not None:
         queryset = queryset.filter(learning_area_id=learning_area_id)
-    return queryset
+    return queryset.distinct()
 
 
 def get_principal_compilation_scope(

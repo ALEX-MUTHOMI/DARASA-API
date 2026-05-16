@@ -3,6 +3,7 @@ from __future__ import annotations
 from django.utils import timezone
 import pytest
 
+from academics.models import TeacherAssignment
 from core.models import CustomUser, Role, TenantUserRole
 from grading.services import (
     compile_assessment,
@@ -89,6 +90,14 @@ def test_hod_deputy_and_principal_projection_are_role_and_tenant_scoped(
 ):
     _compiled_run(school, assessment, teacher_user, principal_user, enrolled_student)
     hod = _create_role_user(school, Role.RoleCode.HOD.value)
+    TeacherAssignment.objects.create(
+        tenant=school,
+        teacher=hod,
+        cohort=assessment.cohort,
+        learning_area=assessment.learning_area,
+        academic_year=assessment.academic_year,
+        term=assessment.term,
+    )
     deputy = _create_role_user(school, Role.RoleCode.DEPUTY_PRINCIPAL.value)
 
     assert get_hod_compilation_projection(actor=hod, tenant=school)["summaries"]
@@ -101,6 +110,22 @@ def test_hod_deputy_and_principal_projection_are_role_and_tenant_scoped(
         actor=principal_user,
         tenant=other_school,
     )["summaries"]
+
+
+def test_hod_projection_fails_closed_without_assignment(
+    school,
+    assessment,
+    teacher_user,
+    teacher_assignment,
+    principal_user,
+    enrolled_student,
+):
+    _compiled_run(school, assessment, teacher_user, principal_user, enrolled_student)
+    hod = _create_role_user(school, Role.RoleCode.HOD.value)
+
+    projection = get_hod_compilation_projection(actor=hod, tenant=school)
+
+    assert projection["summaries"] == []
 
 
 def test_future_parent_projection_fails_closed_without_guardian_role(
@@ -120,4 +145,24 @@ def test_future_parent_projection_fails_closed_without_guardian_role(
     )
 
     assert projection["projection_type"] == "future_parent"
+    assert projection["learner_snapshots"] == []
+
+
+def test_future_parent_projection_fails_closed_even_with_guardian_role(
+    school,
+    assessment,
+    teacher_user,
+    teacher_assignment,
+    principal_user,
+    enrolled_student,
+):
+    _compiled_run(school, assessment, teacher_user, principal_user, enrolled_student)
+    guardian = _create_role_user(school, Role.RoleCode.GUARDIAN.value)
+
+    projection = get_future_parent_learner_projection(
+        actor=guardian,
+        tenant=school,
+        learner_id=enrolled_student.id,
+    )
+
     assert projection["learner_snapshots"] == []
