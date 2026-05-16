@@ -13,15 +13,23 @@ from django.db import transaction
 from django.utils import timezone
 
 from academics.models import TeacherAssignment
-from core.models import Role
+from core.models import Role, TenantUserRole
+from core.policies import PolicyContext
 from core.selectors import user_has_role_in_tenant
 from events.services import write_outbox_event
 from grading.algorithms.batch_validation import validate_grade_rows
+from grading.algorithms.cohort_summary_builder import build_cohort_summary
+from grading.algorithms.compilation_inputs import build_compilation_input
+from grading.algorithms.compilation_status import determine_compilation_status
+from grading.algorithms.component_summary import detect_invalid_component_scores
 from grading.algorithms.draft_merge import (
     normalize_draft_rows,
     validate_draft_version,
 )
 from grading.algorithms.grade_grid_builder import build_grid_contract
+from grading.algorithms.learner_snapshot_builder import build_learner_snapshots
+from grading.algorithms.missing_marks import detect_missing_marks
+from grading.algorithms.role_projection_builder import build_role_projection
 from grading.algorithms.roster_resolver import stable_roster_rows
 from grading.algorithms.submission_confirmation import validate_confirmation
 from grading.algorithms.submission_idempotency import (
@@ -33,16 +41,35 @@ from grading.algorithms.workload_resolver import build_work_item
 from grading.models import (
     Assessment,
     AssessmentComponent,
+    CompilationRun,
+    CompiledAssessmentSnapshot,
+    CompiledCohortSummary,
+    CompiledLearnerSnapshot,
     GradeDraftBatch,
     GradeDraftRow,
     GradeRecord,
     GradeSubmissionBatch,
 )
+from grading.policies import (
+    can_compile_assessment,
+    can_view_deputy_academics_compilation,
+    can_view_future_parent_projection,
+    can_view_hod_compilation,
+    can_view_principal_compilation,
+    can_view_teacher_compilation,
+)
 from grading.selectors import (
     get_assessment_for_teacher,
+    get_assessment_components_for_compilation,
+    get_compiled_learner_snapshots,
+    get_expected_roster_for_compilation,
     get_existing_draft_for_teacher,
     get_existing_submission_for_assessment,
+    get_hod_compilation_scope,
+    get_principal_compilation_scope,
     get_roster_for_assessment,
+    get_submitted_records_for_assessment,
+    get_teacher_compilation_scope,
     get_teacher_grading_contexts,
 )
 
@@ -54,6 +81,11 @@ GRADING_ROLE_CODES = frozenset(
         Role.RoleCode.HOD.value,
     }
 )
+GRADING_TEACHER_ROLE_CODES = {
+    Role.RoleCode.SUBJECT_TEACHER.value,
+    Role.RoleCode.CLASS_TEACHER.value,
+    Role.RoleCode.HOD.value,
+}
 
 CLIENT_CONTROLLED_FIELDS = frozenset(
     {
@@ -96,6 +128,38 @@ def _has_grading_role(*, actor: Any, tenant: Any) -> bool:
     return any(
         user_has_role_in_tenant(user=actor, tenant=tenant, role_code=role_code)
         for role_code in GRADING_ROLE_CODES
+    )
+
+
+def _role_for(actor: Any, tenant: Any, role_codes: set[str]) -> Role | None:
+    if actor is None or tenant is None:
+        return None
+    binding = (
+        TenantUserRole.objects.filter(
+            tenant=tenant,
+            user=actor,
+            role__code__in=role_codes,
+            role__is_active=True,
+            is_active=True,
+        )
+        .select_related("role")
+        .first()
+    )
+    return binding.role if binding else None
+
+
+def _policy_context(
+    *,
+    actor: Any,
+    tenant: Any,
+    action: str,
+    role_codes: set[str],
+) -> PolicyContext:
+    return PolicyContext(
+        tenant=tenant,
+        actor=actor,
+        action=action,
+        role=_role_for(actor, tenant, role_codes),
     )
 
 
@@ -509,3 +573,372 @@ def submit_grade_batch(
 
     transaction.on_commit(emit_batch_submitted)
     return batch
+
+
+def _compilation_context_snapshot(assessment: Assessment) -> dict[str, str]:
+    return {
+        "assessment_id": str(assessment.id),
+        "cohort_id": str(assessment.cohort_id),
+        "learning_area_id": str(assessment.learning_area_id),
+        "curriculum_version_id": str(assessment.curriculum_version_id),
+        "rubric_foundation_id": str(assessment.rubric_foundation_id),
+        "academic_year_id": str(assessment.academic_year_id),
+        "term_id": str(assessment.term_id),
+    }
+
+
+def _component_completion_summary(
+    *,
+    components: list[AssessmentComponent],
+    missing_marks: list[dict[str, Any]],
+) -> dict[str, Any]:
+    return {
+        "component_count": len(components),
+        "required_component_count": len(
+            [component for component in components if component.is_required]
+        ),
+        "missing_required_component_count": len(
+            [
+                item
+                for item in missing_marks
+                if item["code"] == "missing_required_component"
+            ]
+        ),
+    }
+
+
+@transaction.atomic
+def compile_assessment(
+    *,
+    tenant: Any,
+    assessment_id: Any,
+    requested_by: Any | None = None,
+) -> CompilationRun:
+    assessment = Assessment.objects.filter(id=assessment_id, tenant=tenant).first()
+    if assessment is None:
+        raise ValidationError({"assessment": "Assessment is not available."})
+    if requested_by is None:
+        raise ValidationError({"requested_by": "Compilation actor is required."})
+    role_codes = {
+        Role.RoleCode.PRINCIPAL.value,
+        Role.RoleCode.SCHOOL_ADMIN.value,
+        Role.RoleCode.HOD.value,
+    }
+    context = _policy_context(
+        actor=requested_by,
+        tenant=tenant,
+        action="grading.compilation.compile",
+        role_codes=role_codes,
+    )
+    if not can_compile_assessment(
+        context,
+        assessment=assessment,
+    ):
+        raise ValidationError({"assessment": "Compilation is not authorized."})
+    roster = list(
+        get_expected_roster_for_compilation(tenant=tenant, assessment=assessment)
+    )
+    records = list(
+        get_submitted_records_for_assessment(tenant=tenant, assessment=assessment)
+    )
+    components = list(
+        get_assessment_components_for_compilation(
+            tenant=tenant,
+            assessment=assessment,
+        )
+    )
+    compilation_input = build_compilation_input(
+        tenant=tenant,
+        assessment=assessment,
+        roster=roster,
+        grade_records=records,
+        components=components,
+    )
+    missing = detect_missing_marks(
+        roster_student_ids=compilation_input.roster_student_ids,
+        grade_records=records,
+        components=components,
+    )
+    invalid = detect_invalid_component_scores(
+        grade_records=records,
+        components=components,
+        assessment_max_score=assessment.max_score,
+    )
+    status = determine_compilation_status(
+        missing_marks=missing,
+        invalid_records=invalid,
+        has_submitted_records=bool(records),
+    )
+    compiled_at = timezone.now()
+    component_summary = _component_completion_summary(
+        components=components,
+        missing_marks=missing,
+    )
+    summary_payload = build_cohort_summary(
+        assessment=assessment,
+        expected_count=len(compilation_input.roster_student_ids),
+        submitted_count=len(
+            {
+                str(record.student_id)
+                for record in records
+                if str(record.student_id) in compilation_input.roster_student_ids
+            }
+        ),
+        missing_count=len(
+            [item for item in missing if item["code"] == "missing_learner_mark"]
+        ),
+        component_summary=component_summary,
+        status=status,
+    )
+    run = CompilationRun.objects.create(
+        tenant=tenant,
+        assessment=assessment,
+        requested_by=requested_by,
+        status=status,
+        expected_learner_count=summary_payload["expected_learner_count"],
+        submitted_learner_count=summary_payload["submitted_learner_count"],
+        missing_learner_count=summary_payload["missing_learner_count"],
+        source_batch_ids=compilation_input.source_batch_ids,
+        error_summary=";".join(sorted({item["code"] for item in invalid}))[:255],
+        compiled_at=compiled_at,
+    )
+    CompilationRun.objects.filter(tenant=tenant, assessment=assessment).exclude(
+        id=run.id
+    ).update(status=CompilationRun.Status.STALE)
+    CompiledAssessmentSnapshot.objects.create(
+        tenant=tenant,
+        compilation_run=run,
+        assessment=assessment,
+        cohort=assessment.cohort,
+        learning_area=assessment.learning_area,
+        curriculum_version=assessment.curriculum_version,
+        rubric_foundation=assessment.rubric_foundation,
+        status=status,
+        context_snapshot=_compilation_context_snapshot(assessment),
+        summary=summary_payload,
+        compiled_at=compiled_at,
+    )
+    CompiledCohortSummary.objects.create(
+        tenant=tenant,
+        compilation_run=run,
+        assessment=assessment,
+        cohort=assessment.cohort,
+        learning_area=assessment.learning_area,
+        expected_learner_count=summary_payload["expected_learner_count"],
+        submitted_learner_count=summary_payload["submitted_learner_count"],
+        missing_learner_count=summary_payload["missing_learner_count"],
+        completion_percentage=summary_payload["completion_percentage"],
+        component_summary=component_summary,
+        status=status,
+        compiled_at=compiled_at,
+    )
+    snapshots = build_learner_snapshots(
+        compilation_input=compilation_input,
+        missing_marks=missing,
+        status=status,
+        compiled_at=compiled_at,
+    )
+    CompiledLearnerSnapshot.objects.bulk_create(
+        [
+            CompiledLearnerSnapshot(
+                tenant=tenant,
+                compilation_run=run,
+                assessment=assessment,
+                student_id=snapshot["learner_id"],
+                cohort=assessment.cohort,
+                learning_area=assessment.learning_area,
+                curriculum_version=assessment.curriculum_version,
+                rubric_foundation=assessment.rubric_foundation,
+                status=snapshot["compilation_status"],
+                score_summary=snapshot["score_summary"],
+                component_summary=snapshot["component_summary"],
+                missing_marks=snapshot["missing_marks"],
+                cbe_band_status=snapshot["cbe_band_status"],
+                source_batch_ids=snapshot["source_batch_ids"],
+                compiled_at=compiled_at,
+            )
+            for snapshot in snapshots
+        ]
+    )
+
+    def emit_compilation_completed() -> None:
+        write_outbox_event(
+            event_type="grading.compilation_completed",
+            event_version=1,
+            source_module="grading",
+            idempotency_key=f"grading.compilation_completed:{run.id}",
+            tenant=tenant,
+            actor_id=getattr(requested_by, "id", None),
+            payload={
+                "tenant_id": str(tenant.id),
+                "assessment_id": str(assessment.id),
+                "compilation_run_id": str(run.id),
+                "cohort_id": str(assessment.cohort_id),
+                "learning_area_id": str(assessment.learning_area_id),
+                "curriculum_version_id": str(assessment.curriculum_version_id),
+                "status": status,
+                "compiled_at": compiled_at.isoformat(),
+            },
+        )
+
+    transaction.on_commit(emit_compilation_completed)
+    return run
+
+
+def compile_submission_batch(
+    *,
+    tenant: Any,
+    batch_id: Any,
+    requested_by: Any | None = None,
+) -> CompilationRun:
+    batch = (
+        GradeSubmissionBatch.objects.filter(
+            tenant=tenant,
+            id=batch_id,
+            status=GradeSubmissionBatch.Status.SUBMITTED,
+        )
+        .select_related("assessment")
+        .first()
+    )
+    if batch is None:
+        raise ValidationError({"batch": "Submitted batch is not available."})
+    return compile_assessment(
+        tenant=tenant,
+        assessment_id=batch.assessment_id,
+        requested_by=requested_by,
+    )
+
+
+def get_teacher_compilation_projection(
+    *,
+    actor: Any,
+    tenant: Any,
+    assessment_id: Any | None = None,
+) -> dict[str, Any]:
+    summaries = list(
+        get_teacher_compilation_scope(
+            actor=actor,
+            tenant=tenant,
+            assessment_id=assessment_id,
+        )
+    )
+    if not summaries:
+        return build_role_projection(projection_type="teacher", cohort_summaries=[])
+    assessment = summaries[0].assessment
+    context = _policy_context(
+        actor=actor,
+        tenant=tenant,
+        action="grading.compilation.teacher.view",
+        role_codes=GRADING_TEACHER_ROLE_CODES,
+    )
+    if not can_view_teacher_compilation(context, assessment=assessment):
+        return build_role_projection(projection_type="teacher", cohort_summaries=[])
+    return build_role_projection(projection_type="teacher", cohort_summaries=summaries)
+
+
+def get_hod_compilation_projection(
+    *,
+    actor: Any,
+    tenant: Any,
+    filters: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    role_codes = {Role.RoleCode.HOD.value}
+    context = _policy_context(
+        actor=actor,
+        tenant=tenant,
+        action="grading.compilation.hod.view",
+        role_codes=role_codes,
+    )
+    summaries = list(
+        get_hod_compilation_scope(actor=actor, tenant=tenant, filters=filters)
+    )
+    visible = [
+        summary
+        for summary in summaries
+        if can_view_hod_compilation(context, assessment=summary.assessment)
+    ]
+    return build_role_projection(projection_type="hod", cohort_summaries=visible)
+
+
+def get_deputy_academics_projection(
+    *,
+    actor: Any,
+    tenant: Any,
+    filters: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    role_codes = {
+        Role.RoleCode.DEPUTY_PRINCIPAL.value,
+        Role.RoleCode.PRINCIPAL.value,
+        Role.RoleCode.SCHOOL_ADMIN.value,
+    }
+    context = _policy_context(
+        actor=actor,
+        tenant=tenant,
+        action="grading.compilation.deputy.view",
+        role_codes=role_codes,
+    )
+    if not can_view_deputy_academics_compilation(context):
+        return build_role_projection(
+            projection_type="deputy_head_academics",
+            cohort_summaries=[],
+        )
+    summaries = list(
+        get_principal_compilation_scope(actor=actor, tenant=tenant, filters=filters)
+    )
+    return build_role_projection(
+        projection_type="deputy_head_academics",
+        cohort_summaries=summaries,
+    )
+
+
+def get_principal_compilation_projection(
+    *,
+    actor: Any,
+    tenant: Any,
+    filters: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    role_codes = {Role.RoleCode.PRINCIPAL.value, Role.RoleCode.SCHOOL_ADMIN.value}
+    context = _policy_context(
+        actor=actor,
+        tenant=tenant,
+        action="grading.compilation.principal.view",
+        role_codes=role_codes,
+    )
+    if not can_view_principal_compilation(context):
+        return build_role_projection(projection_type="principal", cohort_summaries=[])
+    summaries = list(
+        get_principal_compilation_scope(actor=actor, tenant=tenant, filters=filters)
+    )
+    return build_role_projection(
+        projection_type="principal",
+        cohort_summaries=summaries,
+    )
+
+
+def get_future_parent_learner_projection(
+    *,
+    actor: Any,
+    tenant: Any,
+    learner_id: Any,
+) -> dict[str, Any]:
+    role_codes = {Role.RoleCode.GUARDIAN.value}
+    context = _policy_context(
+        actor=actor,
+        tenant=tenant,
+        action="grading.compilation.future_parent.view",
+        role_codes=role_codes,
+    )
+    if not can_view_future_parent_projection(context, tenant=tenant):
+        return build_role_projection(
+            projection_type="future_parent",
+            cohort_summaries=[],
+            learner_snapshots=[],
+        )
+    snapshots = list(
+        get_compiled_learner_snapshots(tenant=tenant, learner_id=learner_id)
+    )
+    return build_role_projection(
+        projection_type="future_parent",
+        cohort_summaries=[],
+        learner_snapshots=snapshots,
+    )

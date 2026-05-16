@@ -86,6 +86,20 @@ identifiers, record count, and submission time only. It must not contain raw
 marks, component scores, learner names, guardian data, private teacher notes,
 full reports, or raw grade grids.
 
+## Phase 6C Compilation
+
+Compilation is deterministic data preparation, not report generation. Phase 6C
+compiles submitted official grade records into canonical learner snapshots,
+assessment snapshots, and cohort / learning-area summaries. Drafts are ignored.
+The compiler uses the stored assessment CBE/CCT context; it does not call CCT
+source validation, web logic, or curriculum diffing per learner or mark.
+
+Role-aware projections are views over the same compiled facts. Teacher, HOD,
+deputy/head, principal, and future parent-safe projections may filter and shape
+data, but they must not create separate academic truth. Future parent
+projection foundations are learner-specific and exclude drafts, internal review
+notes, unapproved corrections, and school-wide analytics.
+
 ## Phase Boundaries
 
 Compilation is separate from report generation. Phase 6C can compile

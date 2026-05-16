@@ -55,9 +55,15 @@ spreadsheet grid contract, draft save/resume, practical/component grid support,
 step-up-confirmed final submission, transactional grade-record commits, and one
 compact batch-level event. It still does not compile report summaries.
 
+Phase 6C adds deterministic compilation: submitted official `GradeRecord`s are
+converted into canonical learner snapshots, assessment snapshots, cohort /
+learning-area summaries, and role-aware backend projections. One academic truth
+feeds teacher, HOD, deputy/head, principal, and future parent-safe views.
+Reports, PDFs, parent portal UI, and NLP remain future phases.
+
 ## Active Boundary Rules
 
-The default test command now includes Phase 1 through Phase 6B work and
+The default test command now includes Phase 1 through Phase 6C work and
 continues to exclude future markers, integration-heavy tests, and chaos tests.
 
 The grading app is intentionally active for Phase 6A and later. Future report,

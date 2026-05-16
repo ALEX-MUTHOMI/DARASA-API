@@ -49,6 +49,11 @@ submission time only. Do not put raw marks, component scores, learner names,
 guardian data, teacher private notes, report text, or raw grade grids into
 events.
 
+Phase 6C emits `grading.compilation_completed` after a deterministic
+compilation transaction commits. The payload is reference-only: tenant,
+assessment, compilation run, cohort, learning area, curriculum version, status,
+and compiled time. Do not emit one event per learner, component, or score.
+
 ## Ownership
 
 Changes under `app/events`, event docs, CI, Docker, settings, and scripts should

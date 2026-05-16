@@ -10,6 +10,10 @@ from django.db.models import QuerySet
 
 from grading.models import (
     Assessment,
+    AssessmentComponent,
+    CompilationRun,
+    CompiledCohortSummary,
+    CompiledLearnerSnapshot,
     GradeDraftBatch,
     GradeCorrectionRequest,
     GradeRecord,
@@ -225,3 +229,153 @@ def get_pending_corrections_for_reviewer(
         tenant=tenant,
         status=GradeCorrectionRequest.Status.REQUESTED,
     ).select_related("grade_record", "requested_by")
+
+
+def get_submitted_records_for_assessment(
+    *,
+    tenant: Any,
+    assessment: Assessment,
+) -> QuerySet[GradeRecord]:
+    if tenant is None or assessment is None or assessment.tenant_id != tenant.id:
+        return GradeRecord.objects.none()
+    return (
+        GradeRecord.objects.filter(
+            tenant=tenant,
+            assessment=assessment,
+            submission_batch__status=GradeSubmissionBatch.Status.SUBMITTED,
+        )
+        .select_related("student", "assessment", "submission_batch")
+        .order_by("student__admission_number", "student_id")
+    )
+
+
+def get_expected_roster_for_compilation(
+    *,
+    tenant: Any,
+    assessment: Assessment,
+) -> QuerySet[Any]:
+    return get_roster_for_assessment(tenant=tenant, assessment=assessment)
+
+
+def get_assessment_components_for_compilation(
+    *,
+    tenant: Any,
+    assessment: Assessment,
+) -> QuerySet[AssessmentComponent]:
+    if tenant is None or assessment is None or assessment.tenant_id != tenant.id:
+        return AssessmentComponent.objects.none()
+    return AssessmentComponent.objects.filter(
+        tenant=tenant,
+        assessment=assessment,
+    ).order_by("order", "name")
+
+
+def get_latest_compilation_run(
+    *,
+    tenant: Any,
+    assessment: Assessment,
+) -> CompilationRun | None:
+    if tenant is None or assessment is None:
+        return None
+    return (
+        CompilationRun.objects.filter(tenant=tenant, assessment=assessment)
+        .order_by("-compiled_at", "-created_at")
+        .first()
+    )
+
+
+def get_compiled_learner_snapshots(
+    *,
+    tenant: Any,
+    assessment: Assessment | None = None,
+    learner_id: Any | None = None,
+) -> QuerySet[CompiledLearnerSnapshot]:
+    if tenant is None:
+        return CompiledLearnerSnapshot.objects.none()
+    queryset = CompiledLearnerSnapshot.objects.filter(tenant=tenant).select_related(
+        "assessment",
+        "student",
+        "cohort",
+        "learning_area",
+        "compilation_run",
+    )
+    if assessment is not None:
+        queryset = queryset.filter(assessment=assessment)
+    if learner_id is not None:
+        queryset = queryset.filter(student_id=learner_id)
+    return queryset.order_by("student__admission_number", "assessment_id")
+
+
+def get_compiled_cohort_summary(
+    *,
+    tenant: Any,
+    assessment: Assessment | None = None,
+) -> QuerySet[CompiledCohortSummary]:
+    if tenant is None:
+        return CompiledCohortSummary.objects.none()
+    queryset = CompiledCohortSummary.objects.filter(tenant=tenant).select_related(
+        "assessment",
+        "cohort",
+        "learning_area",
+        "compilation_run",
+    )
+    if assessment is not None:
+        queryset = queryset.filter(assessment=assessment)
+    return queryset.order_by("-compiled_at", "assessment_id")
+
+
+def get_teacher_compilation_scope(
+    *,
+    actor: Any,
+    tenant: Any,
+    assessment_id: Any | None = None,
+) -> QuerySet[CompiledCohortSummary]:
+    if actor is None or tenant is None:
+        return CompiledCohortSummary.objects.none()
+    queryset = get_compiled_cohort_summary(tenant=tenant).filter(
+        assessment__cohort__teacher_assignments__teacher=actor,
+        assessment__cohort__teacher_assignments__learning_area=models.F(
+            "assessment__learning_area"
+        ),
+        assessment__cohort__teacher_assignments__academic_year=models.F(
+            "assessment__academic_year"
+        ),
+        assessment__cohort__teacher_assignments__term=models.F("assessment__term"),
+        assessment__cohort__teacher_assignments__is_active=True,
+    )
+    if assessment_id is not None:
+        assessment_uuid = _safe_uuid(assessment_id)
+        if assessment_uuid is None:
+            return CompiledCohortSummary.objects.none()
+        queryset = queryset.filter(assessment_id=assessment_uuid)
+    return queryset.distinct()
+
+
+def get_hod_compilation_scope(
+    *,
+    actor: Any,
+    tenant: Any,
+    filters: dict[str, Any] | None = None,
+) -> QuerySet[CompiledCohortSummary]:
+    if actor is None or tenant is None:
+        return CompiledCohortSummary.objects.none()
+    queryset = get_compiled_cohort_summary(tenant=tenant)
+    learning_area_id = (filters or {}).get("learning_area_id")
+    if learning_area_id is not None:
+        queryset = queryset.filter(learning_area_id=learning_area_id)
+    return queryset
+
+
+def get_principal_compilation_scope(
+    *,
+    actor: Any,
+    tenant: Any,
+    filters: dict[str, Any] | None = None,
+) -> QuerySet[CompiledCohortSummary]:
+    if actor is None or tenant is None:
+        return CompiledCohortSummary.objects.none()
+    queryset = get_compiled_cohort_summary(tenant=tenant)
+    status = (filters or {}).get("status")
+    if status:
+        queryset = queryset.filter(status=status)
+    return queryset

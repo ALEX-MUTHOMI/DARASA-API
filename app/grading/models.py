@@ -903,3 +903,266 @@ class GradeCorrectionRequest(TimeStampedModel):
 
     def __str__(self) -> str:
         return f"GradeCorrectionRequest {self.pk}"
+
+
+class CompilationRun(TimeStampedModel):
+    """One deterministic compilation pass for a CBE-bound assessment."""
+
+    class Status(models.TextChoices):
+        PENDING = "pending", _("Pending")
+        COMPLETE = "complete", _("Complete")
+        PARTIAL = "partial", _("Partial")
+        FAILED = "failed", _("Failed")
+        STALE = "stale", _("Stale")
+        BLOCKED = "blocked", _("Blocked")
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    tenant = models.ForeignKey(
+        School,
+        on_delete=models.CASCADE,
+        related_name="compilation_runs",
+    )
+    assessment = models.ForeignKey(
+        Assessment,
+        on_delete=models.PROTECT,
+        related_name="compilation_runs",
+    )
+    requested_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="requested_compilation_runs",
+    )
+    status = models.CharField(
+        max_length=32,
+        choices=Status.choices,
+        default=Status.PENDING,
+        db_index=True,
+    )
+    expected_learner_count = models.PositiveIntegerField(default=0)
+    submitted_learner_count = models.PositiveIntegerField(default=0)
+    missing_learner_count = models.PositiveIntegerField(default=0)
+    source_batch_ids = models.JSONField(default=list, blank=True)
+    error_summary = models.CharField(max_length=255, blank=True)
+    compiled_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta(TimeStampedModel.Meta):
+        indexes = [
+            models.Index(
+                fields=["tenant", "assessment", "status"],
+                name="grading_compile_run_idx",
+            ),
+        ]
+
+    def clean(self) -> None:
+        super().clean()
+        if self.tenant_id and self.assessment_id:
+            if self.assessment.tenant_id != self.tenant_id:
+                raise ValidationError({"tenant": _("Compilation tenant is invalid.")})
+        if not isinstance(self.source_batch_ids, list):
+            raise ValidationError(
+                {"source_batch_ids": _("Source batches must be a list.")}
+            )
+
+    def save(self, *args: Any, **kwargs: Any) -> Any:
+        self.full_clean()
+        return super().save(*args, **kwargs)
+
+
+class CompiledAssessmentSnapshot(TimeStampedModel):
+    """Canonical assessment-level academic facts, not a report."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    tenant = models.ForeignKey(
+        School,
+        on_delete=models.CASCADE,
+        related_name="compiled_assessment_snapshots",
+    )
+    compilation_run = models.OneToOneField(
+        CompilationRun,
+        on_delete=models.CASCADE,
+        related_name="assessment_snapshot",
+    )
+    assessment = models.ForeignKey(
+        Assessment,
+        on_delete=models.PROTECT,
+        related_name="compiled_assessment_snapshots",
+    )
+    cohort = models.ForeignKey(Cohort, on_delete=models.PROTECT)
+    learning_area = models.ForeignKey(LearningArea, on_delete=models.PROTECT)
+    curriculum_version = models.ForeignKey(
+        "curriculum.CurriculumVersion",
+        on_delete=models.PROTECT,
+    )
+    rubric_foundation = models.ForeignKey(
+        "curriculum.AssessmentRubricFoundation",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+    )
+    status = models.CharField(max_length=32, db_index=True)
+    context_snapshot = models.JSONField(default=dict, blank=True)
+    summary = models.JSONField(default=dict, blank=True)
+    compiled_at = models.DateTimeField(default=timezone.now)
+
+    class Meta(TimeStampedModel.Meta):
+        indexes = [
+            models.Index(
+                fields=["tenant", "assessment", "status"],
+                name="grading_assess_snap_idx",
+            ),
+        ]
+
+    def clean(self) -> None:
+        super().clean()
+        if self.tenant_id and self.assessment_id:
+            if self.assessment.tenant_id != self.tenant_id:
+                raise ValidationError({"tenant": _("Snapshot tenant is invalid.")})
+            if self.assessment.cohort_id != self.cohort_id:
+                raise ValidationError({"cohort": _("Snapshot cohort is invalid.")})
+            if self.assessment.learning_area_id != self.learning_area_id:
+                raise ValidationError(
+                    {"learning_area": _("Snapshot learning area is invalid.")}
+                )
+            if self.assessment.curriculum_version_id != self.curriculum_version_id:
+                raise ValidationError(
+                    {"curriculum_version": _("Snapshot curriculum is invalid.")}
+                )
+            if self.assessment.rubric_foundation_id != self.rubric_foundation_id:
+                raise ValidationError(
+                    {"rubric_foundation": _("Snapshot rubric is invalid.")}
+                )
+
+    def save(self, *args: Any, **kwargs: Any) -> Any:
+        self.full_clean()
+        return super().save(*args, **kwargs)
+
+
+class CompiledLearnerSnapshot(TimeStampedModel):
+    """Learner-specific compiled facts for future reports or parent-safe views."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    tenant = models.ForeignKey(
+        School,
+        on_delete=models.CASCADE,
+        related_name="compiled_learner_snapshots",
+    )
+    compilation_run = models.ForeignKey(
+        CompilationRun,
+        on_delete=models.CASCADE,
+        related_name="learner_snapshots",
+    )
+    assessment = models.ForeignKey(Assessment, on_delete=models.PROTECT)
+    student = models.ForeignKey(Student, on_delete=models.PROTECT)
+    cohort = models.ForeignKey(Cohort, on_delete=models.PROTECT)
+    learning_area = models.ForeignKey(LearningArea, on_delete=models.PROTECT)
+    curriculum_version = models.ForeignKey(
+        "curriculum.CurriculumVersion",
+        on_delete=models.PROTECT,
+    )
+    rubric_foundation = models.ForeignKey(
+        "curriculum.AssessmentRubricFoundation",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+    )
+    status = models.CharField(max_length=32, db_index=True)
+    score_summary = models.JSONField(default=dict, blank=True)
+    component_summary = models.JSONField(default=dict, blank=True)
+    missing_marks = models.JSONField(default=list, blank=True)
+    cbe_band_status = models.CharField(max_length=64, blank=True)
+    source_batch_ids = models.JSONField(default=list, blank=True)
+    compiled_at = models.DateTimeField(default=timezone.now)
+
+    class Meta(TimeStampedModel.Meta):
+        constraints = [
+            models.UniqueConstraint(
+                fields=["tenant", "assessment", "student", "compilation_run"],
+                name="grading_compiled_learner_unique",
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=["tenant", "assessment", "student"],
+                name="grading_learn_snap_idx",
+            ),
+            models.Index(
+                fields=["tenant", "cohort", "learning_area"],
+                name="grading_learn_snap_scope_idx",
+            ),
+        ]
+
+    def clean(self) -> None:
+        super().clean()
+        related_tenants = [
+            getattr(self.compilation_run, "tenant_id", None),
+            getattr(self.assessment, "tenant_id", None),
+            getattr(self.student, "tenant_id", None),
+            getattr(self.cohort, "tenant_id", None),
+            getattr(self.learning_area, "tenant_id", None),
+        ]
+        if self.tenant_id and any(value != self.tenant_id for value in related_tenants):
+            raise ValidationError({"tenant": _("Learner snapshot tenant is invalid.")})
+        if not isinstance(self.source_batch_ids, list):
+            raise ValidationError(
+                {"source_batch_ids": _("Source batches must be a list.")}
+            )
+
+    def save(self, *args: Any, **kwargs: Any) -> Any:
+        self.full_clean()
+        return super().save(*args, **kwargs)
+
+
+class CompiledCohortSummary(TimeStampedModel):
+    """Cohort and learning-area completion facts for role-aware projections."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    tenant = models.ForeignKey(
+        School,
+        on_delete=models.CASCADE,
+        related_name="compiled_cohort_summaries",
+    )
+    compilation_run = models.OneToOneField(
+        CompilationRun,
+        on_delete=models.CASCADE,
+        related_name="cohort_summary",
+    )
+    assessment = models.ForeignKey(Assessment, on_delete=models.PROTECT)
+    cohort = models.ForeignKey(Cohort, on_delete=models.PROTECT)
+    learning_area = models.ForeignKey(LearningArea, on_delete=models.PROTECT)
+    expected_learner_count = models.PositiveIntegerField(default=0)
+    submitted_learner_count = models.PositiveIntegerField(default=0)
+    missing_learner_count = models.PositiveIntegerField(default=0)
+    completion_percentage = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        default=Decimal("0.00"),
+    )
+    component_summary = models.JSONField(default=dict, blank=True)
+    status = models.CharField(max_length=32, db_index=True)
+    compiled_at = models.DateTimeField(default=timezone.now)
+
+    class Meta(TimeStampedModel.Meta):
+        indexes = [
+            models.Index(
+                fields=["tenant", "cohort", "learning_area", "status"],
+                name="grading_cohort_summary_idx",
+            ),
+        ]
+
+    def clean(self) -> None:
+        super().clean()
+        if self.tenant_id and self.assessment_id:
+            if self.assessment.tenant_id != self.tenant_id:
+                raise ValidationError({"tenant": _("Cohort summary tenant invalid.")})
+            if self.assessment.cohort_id != self.cohort_id:
+                raise ValidationError({"cohort": _("Cohort summary scope invalid.")})
+            if self.assessment.learning_area_id != self.learning_area_id:
+                raise ValidationError(
+                    {"learning_area": _("Cohort summary scope invalid.")}
+                )
+
+    def save(self, *args: Any, **kwargs: Any) -> Any:
+        self.full_clean()
+        return super().save(*args, **kwargs)

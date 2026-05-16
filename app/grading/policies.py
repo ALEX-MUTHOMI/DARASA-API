@@ -23,6 +23,13 @@ GRADING_ADMIN_ROLES = frozenset(
         Role.RoleCode.HOD.value,
     }
 )
+GRADING_EXECUTIVE_ROLES = frozenset(
+    {
+        Role.RoleCode.PRINCIPAL.value,
+        Role.RoleCode.SCHOOL_ADMIN.value,
+        Role.RoleCode.DEPUTY_PRINCIPAL.value,
+    }
+)
 GRADING_TEACHER_ROLES = frozenset(
     {
         Role.RoleCode.SUBJECT_TEACHER.value,
@@ -178,3 +185,70 @@ def can_view_grade_completion_summary(
     if not assessment.is_operationally_bound():
         return False
     return _is_admin(context)
+
+
+def can_compile_assessment(context: PolicyContext, *, assessment: Assessment) -> bool:
+    if context.action != "grading.compilation.compile":
+        return False
+    if not _in_tenant(context, assessment):
+        return False
+    if not assessment.is_operationally_bound():
+        return False
+    return _is_admin(context)
+
+
+def can_view_teacher_compilation(
+    context: PolicyContext,
+    *,
+    assessment: Assessment,
+) -> bool:
+    if context.action != "grading.compilation.teacher.view":
+        return False
+    return _has_assignment_for_assessment(context, assessment=assessment)
+
+
+def can_view_hod_compilation(context: PolicyContext, *, assessment: Assessment) -> bool:
+    if context.action != "grading.compilation.hod.view":
+        return False
+    if not _in_tenant(context, assessment):
+        return False
+    return _context_is_valid(context) and context.role.code == Role.RoleCode.HOD.value
+
+
+def can_view_deputy_academics_compilation(
+    context: PolicyContext,
+    *,
+    assessment: Assessment | None = None,
+) -> bool:
+    if context.action != "grading.compilation.deputy.view":
+        return False
+    if not _context_is_valid(context):
+        return False
+    if context.role.code not in GRADING_EXECUTIVE_ROLES:
+        return False
+    return assessment is None or _in_tenant(context, assessment)
+
+
+def can_view_principal_compilation(
+    context: PolicyContext,
+    *,
+    assessment: Assessment | None = None,
+) -> bool:
+    if context.action != "grading.compilation.principal.view":
+        return False
+    if not _context_is_valid(context):
+        return False
+    if context.role.code not in {
+        Role.RoleCode.PRINCIPAL.value,
+        Role.RoleCode.SCHOOL_ADMIN.value,
+    }:
+        return False
+    return assessment is None or _in_tenant(context, assessment)
+
+
+def can_view_future_parent_projection(context: PolicyContext, *, tenant: Any) -> bool:
+    if context.action != "grading.compilation.future_parent.view":
+        return False
+    if context.tenant != tenant:
+        return False
+    return _context_is_valid(context) and context.role.code == Role.RoleCode.GUARDIAN

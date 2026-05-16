@@ -69,3 +69,9 @@ one compact event is emitted per submitted batch after commit. Draft retention
 is a production-readiness requirement: abandoned drafts must be expired or
 archived by tenant, assessment, and age before schools rely on the workflow at
 scale.
+
+Phase 6C compiles official submitted records into canonical snapshots and
+role-aware projections. Compilation does not generate reports, PDFs, parent
+portal responses, or NLP text. Projections must derive from the same compiled
+facts and remain tenant/policy scoped; they may filter and shape data, but they
+must not recalculate academic meaning per role.
