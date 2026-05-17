@@ -68,6 +68,13 @@ bounded notice batches, and dependency guards for grading, compilation, and
 future reporting. It does not rebuild CCT, crawl live sources, interpret
 curriculum with AI, or change historical grading/compilation records.
 
+CCT red-team verification attacks the fortified control plane with malicious
+URLs, executable HTML metadata, UUID guessing, role escalation, mass assignment,
+invalid lifecycle transitions, event payload injection, and workload
+amplification simulations. The expected result is bounded, tenant-scoped,
+reference-only governance behavior; production traffic protection still
+requires infrastructure rate limits and monitoring.
+
 ## Active Boundary Rules
 
 The default test command now includes Phase 1 through Phase 6C work and

@@ -16,6 +16,8 @@ from django.db import transaction
 from django.utils import timezone
 
 from academics.models import GradeLevel, LearningArea
+from core.models import Role, TenantUserRole
+from core.selectors import user_has_role_in_tenant
 from curriculum.algorithms.dependency_guards import (
     validate_grading_dependency_state,
     validate_historical_dependency_state,
@@ -84,6 +86,38 @@ def _save_clean(instance: Any) -> Any:
 def _require_active_reviewer(user: Any) -> None:
     if user is None or not getattr(user, "is_active", False):
         raise ValidationError({"reviewed_by": "An active reviewer is required."})
+
+
+def _require_curriculum_truth_manager(
+    user: Any,
+    *,
+    field: str = "reviewed_by",
+) -> None:
+    _require_active_reviewer(user)
+    allowed = {
+        Role.RoleCode.PRINCIPAL.value,
+        Role.RoleCode.SCHOOL_ADMIN.value,
+    }
+    if not TenantUserRole.objects.filter(
+        user=user,
+        is_active=True,
+        role__is_active=True,
+        role__code__in=allowed,
+    ).exists():
+        raise ValidationError({field: "Curriculum authority role is required."})
+
+
+def _require_school_curriculum_manager(user: Any, tenant: Any) -> None:
+    _require_active_reviewer(user)
+    allowed = {
+        Role.RoleCode.PRINCIPAL.value,
+        Role.RoleCode.SCHOOL_ADMIN.value,
+    }
+    if not any(
+        user_has_role_in_tenant(user=user, tenant=tenant, role_code=role_code)
+        for role_code in allowed
+    ):
+        raise ValidationError({"actor": "Curriculum school authority is required."})
 
 
 def _record_curriculum_event_after_commit(
@@ -229,7 +263,7 @@ def approve_change_set(
     change_set: CurriculumChangeSet,
     reviewed_by: Any,
 ) -> CurriculumChangeSet:
-    _require_active_reviewer(reviewed_by)
+    _require_curriculum_truth_manager(reviewed_by)
     _move_change_set_to_review(change_set)
     validate_transition(
         change_set.status,
@@ -247,7 +281,7 @@ def reject_change_set(
     change_set: CurriculumChangeSet,
     reviewed_by: Any,
 ) -> CurriculumChangeSet:
-    _require_active_reviewer(reviewed_by)
+    _require_curriculum_truth_manager(reviewed_by)
     if change_set.status not in {
         CurriculumChangeSet.Status.DETECTED,
         CurriculumChangeSet.Status.QUARANTINED,
@@ -277,7 +311,10 @@ def create_curriculum_publication(
             {"is_active": "Active publication requires approved workflow."}
         )
     if is_active:
-        _require_active_reviewer(approved_by)
+        _require_curriculum_truth_manager(
+            approved_by,
+            field="approved_by",
+        )
     return _save_clean(
         CurriculumPublication(
             curriculum_version=curriculum_version,
@@ -303,7 +340,10 @@ def publish_curriculum_version(
         raise ValidationError(
             {"curriculum_version": "Approved curriculum version is required."}
         )
-    _require_active_reviewer(approved_by)
+    _require_curriculum_truth_manager(
+        approved_by,
+        field="approved_by",
+    )
     if change_set.proposed_curriculum_version_id != curriculum_version.id:
         raise ValidationError(
             {"curriculum_version": "Published version must match the change set."}
@@ -387,7 +427,7 @@ def schedule_school_curriculum_adoption(
     scheduled_by: Any,
     notes: str = "",
 ) -> SchoolCurriculumAdoption:
-    _require_active_reviewer(scheduled_by)
+    _require_school_curriculum_manager(scheduled_by, tenant)
     publication = _active_publication_for_version(curriculum_version)
     if publication is None:
         raise ValidationError(
@@ -429,7 +469,7 @@ def activate_school_curriculum_adoption(
     adoption: SchoolCurriculumAdoption,
     activated_by: Any,
 ) -> SchoolCurriculumAdoption:
-    _require_active_reviewer(activated_by)
+    _require_school_curriculum_manager(activated_by, adoption.tenant)
     if _version_is_withdrawn(adoption.curriculum_version):
         raise ValidationError(
             {"curriculum_version": "Withdrawn curriculum cannot be activated."}
@@ -448,7 +488,10 @@ def mark_curriculum_version_withdrawn(
     reason: str,
     replacement_version: CurriculumVersion | None = None,
 ) -> CurriculumVersionWithdrawal:
-    _require_active_reviewer(withdrawn_by)
+    _require_curriculum_truth_manager(
+        withdrawn_by,
+        field="withdrawn_by",
+    )
     withdrawal = _save_clean(
         CurriculumVersionWithdrawal(
             curriculum_version=curriculum_version,
@@ -483,7 +526,7 @@ def plan_curriculum_rollback(
     target_version: CurriculumVersion | None = None,
     affected_assessment_count: int = 0,
 ) -> CurriculumRollbackPlan:
-    _require_active_reviewer(planned_by)
+    _require_school_curriculum_manager(planned_by, tenant)
     plan = _save_clean(
         CurriculumRollbackPlan(
             tenant=tenant,
@@ -521,7 +564,13 @@ def create_notice_batch_run(
     curriculum_version: CurriculumVersion | None = None,
     notes: str = "",
 ) -> CurriculumNoticeBatchRun:
-    _require_active_reviewer(created_by)
+    if tenant is not None:
+        _require_school_curriculum_manager(created_by, tenant)
+    else:
+        _require_curriculum_truth_manager(
+            created_by,
+            field="created_by",
+        )
     plan = plan_notice_batch(total_count=total_count, batch_size=batch_size)
     batch = _save_clean(
         CurriculumNoticeBatchRun(
@@ -932,7 +981,7 @@ def register_regulatory_notice(
     """Register source-backed regulatory intelligence without auto-activation."""
     _ = status
     if review_status == RegulatoryNotice.ReviewStatus.VERIFIED:
-        _require_active_reviewer(reviewed_by)
+        _require_curriculum_truth_manager(reviewed_by)
     classified_type = notice_type or classify_notice_algorithm(
         authority_code=authority.code,
         title=title,

@@ -47,6 +47,13 @@ Governance text rejects obvious learner-specific PII patterns. This keeps
 curriculum updates, regulatory notices, evidence cards, and acknowledgement
 notes from becoming accidental child-data stores.
 
+Governance text also rejects executable HTML patterns. CCT metadata, notice
+text, rollback reasons, and upload metadata remain untrusted plaintext; future
+frontends must escape them and must not treat backend-stored text as safe HTML.
+Future evidence uploads require private malware-scan-ready storage, checksum
+fingerprinting, MIME verification, file size limits, rate limits, and audit
+logs before production use.
+
 ## Event Backbone
 
 Events are typed, versioned facts. Producers are allowlisted, tenant-scoped

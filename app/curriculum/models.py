@@ -85,6 +85,8 @@ class CurriculumSourceDocument(TimeStampedModel):
         _require_text(self.title, "title")
         _require_text(self.document_code, "document_code")
         _require_text(self.document_version_label, "document_version_label")
+        validate_governance_text(self.title)
+        validate_governance_text(self.document_version_label)
         self.title = self.title.strip()
         self.document_code = self.document_code.strip()
         self.document_version_label = self.document_version_label.strip()
@@ -146,6 +148,7 @@ class CurriculumVersion(TimeStampedModel):
     def clean(self) -> None:
         super().clean()
         _require_text(self.version_label, "version_label")
+        validate_governance_text(self.version_label)
         self.version_label = self.version_label.strip()
         if self.effective_to and self.effective_to <= self.effective_from:
             raise ValidationError(
@@ -1679,6 +1682,7 @@ class RegulatoryNotice(TimeStampedModel):
     def clean(self) -> None:
         super().clean()
         _require_text(self.title, "title")
+        validate_governance_text(self.title)
         validate_governance_text(self.summary)
         self.title = self.title.strip()
         self.reference_number = self.reference_number.strip()
@@ -1950,6 +1954,7 @@ class PrincipalNotificationEvidenceCard(TimeStampedModel):
     def clean(self) -> None:
         super().clean()
         _require_text(self.title, "title")
+        validate_governance_text(self.title)
         validate_governance_text(self.summary)
         validate_governance_text(self.evidence_summary)
         validate_governance_text(self.required_action)

@@ -67,6 +67,11 @@ learner names, report text, or NLP output in CCT event payloads. National notice
 issuance must use bounded batch-level facts, not one event per school or
 teacher.
 
+CCT event producers must derive payloads from committed governance objects.
+Client-provided `event_payload`, HTML bodies, raw document bodies, uploaded
+file bytes, grade data, and learner or guardian data are rejected by the shared
+payload guard.
+
 ## Ownership
 
 Changes under `app/events`, event docs, CI, Docker, settings, and scripts should

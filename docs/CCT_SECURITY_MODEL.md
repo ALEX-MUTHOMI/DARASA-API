@@ -29,6 +29,18 @@ Source artifacts require bounded file size, allowed content type, safe file
 name, and SHA-256 checksum. Artifacts start quarantined and cannot become
 trusted automatically.
 
+School-uploaded or manually submitted material is evidence, not curriculum
+truth. Future upload endpoints must add a principal/deputy/head role gate,
+step-up confirmation, file size limits, MIME and content verification,
+checksum fingerprinting, malware-scan-ready private storage, no public direct
+file URLs, no macro execution, no unsafe parsing in the request path, rate
+limits, and audit logs.
+
+Evidence metadata and governance notes are stored as untrusted plaintext. The
+backend rejects executable HTML patterns and obvious learner PII; any frontend
+or future document renderer must still escape output and must not render raw
+circular text as trusted HTML.
+
 ## Workflow Integrity
 
 Detected changes cannot publish directly. A change must move through quarantine,
@@ -57,6 +69,12 @@ assessment when grading began.
 Principal evidence notices and teacher readiness notices remain evidence-backed
 and tenant or assignment scoped. National-scale rollout must use bounded notice
 batches rather than synchronous fan-out to every school.
+
+Production DDoS resistance also requires infrastructure controls such as WAF,
+rate limiting, request size limits, queue back-pressure, and operational
+monitoring. The application layer only enforces bounded planning and scoped
+selectors; it must not synchronously process every school, learner, document
+page, or dependent app in one request.
 
 ## Senior School Intelligence
 
