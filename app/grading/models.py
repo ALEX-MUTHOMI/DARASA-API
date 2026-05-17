@@ -217,6 +217,11 @@ class Assessment(TimeStampedModel):
     def _validate_curriculum_binding_for_status(self) -> None:
         if not assessment_status_requires_binding(self.status):
             return
+        preserved_historical_context = (
+            self.pk is not None
+            and self.curriculum_binding_locked_at is not None
+            and not self._curriculum_context_changed_fields()
+        )
         result = validate_curriculum_binding(
             status=self.status,
             curriculum_version_id=self.curriculum_version_id,
@@ -225,7 +230,11 @@ class Assessment(TimeStampedModel):
             curriculum_version_is_active=bool(
                 getattr(self.curriculum_version, "is_active", False)
             ),
-            has_active_publication=self._has_active_curriculum_publication(),
+            has_active_publication=(
+                True
+                if preserved_historical_context
+                else self._has_active_curriculum_publication()
+            ),
             rubric_matches_context=self._rubric_matches_assessment_context(),
         )
         if not result.is_bound:
@@ -236,12 +245,18 @@ class Assessment(TimeStampedModel):
     def _has_active_curriculum_publication(self) -> bool:
         if self.curriculum_version_id is None:
             return False
-        from curriculum.models import CurriculumPublication
+        from curriculum.services import validate_curriculum_context_for_grading_binding
 
-        return CurriculumPublication.objects.filter(
-            curriculum_version_id=self.curriculum_version_id,
-            is_active=True,
-        ).exists()
+        try:
+            validate_curriculum_context_for_grading_binding(
+                tenant=self.tenant,
+                curriculum_version=self.curriculum_version,
+                learning_area=self.learning_area,
+                rubric_foundation=self.rubric_foundation,
+            )
+        except ValidationError:
+            return False
+        return True
 
     def _rubric_matches_assessment_context(self) -> bool:
         if (
@@ -267,27 +282,7 @@ class Assessment(TimeStampedModel):
         )
 
     def _validate_curriculum_context_immutability(self) -> None:
-        if self.pk is None:
-            return
-        original = (
-            Assessment.objects.filter(pk=self.pk)
-            .values("curriculum_version_id", "learning_area_id", "rubric_foundation_id")
-            .first()
-        )
-        if original is None:
-            return
-        changed_fields = changed_curriculum_context_fields(
-            old_values={
-                "curriculum_version": original["curriculum_version_id"],
-                "learning_area": original["learning_area_id"],
-                "rubric_foundation": original["rubric_foundation_id"],
-            },
-            new_values={
-                "curriculum_version": self.curriculum_version_id,
-                "learning_area": self.learning_area_id,
-                "rubric_foundation": self.rubric_foundation_id,
-            },
-        )
+        changed_fields = self._curriculum_context_changed_fields()
         if not changed_fields:
             return
         has_submitted_batches = self.submission_batches.exclude(
@@ -307,6 +302,29 @@ class Assessment(TimeStampedModel):
                     )
                 }
             )
+
+    def _curriculum_context_changed_fields(self) -> list[str]:
+        if self.pk is None:
+            return []
+        original = (
+            Assessment.objects.filter(pk=self.pk)
+            .values("curriculum_version_id", "learning_area_id", "rubric_foundation_id")
+            .first()
+        )
+        if original is None:
+            return []
+        return changed_curriculum_context_fields(
+            old_values={
+                "curriculum_version": original["curriculum_version_id"],
+                "learning_area": original["learning_area_id"],
+                "rubric_foundation": original["rubric_foundation_id"],
+            },
+            new_values={
+                "curriculum_version": self.curriculum_version_id,
+                "learning_area": self.learning_area_id,
+                "rubric_foundation": self.rubric_foundation_id,
+            },
+        )
 
     def __str__(self) -> str:
         return f"Assessment {self.pk}"

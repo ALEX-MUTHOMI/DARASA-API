@@ -16,9 +16,15 @@ from django.db import transaction
 from django.utils import timezone
 
 from academics.models import GradeLevel, LearningArea
+from curriculum.algorithms.dependency_guards import (
+    validate_grading_dependency_state,
+    validate_historical_dependency_state,
+    validate_reporting_dependency_state,
+)
 from curriculum.algorithms.curriculum_impact_analyzer import analyze_diff_item_impact
 from curriculum.algorithms.authority_normalizer import normalize_authority_code
 from curriculum.algorithms.checksum import compute_sha256
+from curriculum.algorithms.notice_batch_planning import plan_notice_batch
 from curriculum.algorithms.principal_notification_builder import (
     build_notification_payload,
 )
@@ -29,6 +35,7 @@ from curriculum.algorithms.regulatory_notice_classifier import (
 from curriculum.algorithms.senior_school_dependency_mapper import (
     map_junior_to_senior_signals,
 )
+from curriculum.algorithms.rollout_planning import validate_adoption_window
 from curriculum.algorithms.teacher_readiness_mapper import (
     map_teacher_readiness_requirement as map_teacher_requirement_algorithm,
 )
@@ -42,11 +49,14 @@ from curriculum.models import (
     CurriculumGradeMapping,
     CurriculumImpact,
     CurriculumLearningArea,
+    CurriculumNoticeBatchRun,
     CurriculumPublication,
+    CurriculumRollbackPlan,
     CurriculumSourceDocument,
     CurriculumStage,
     CurriculumValue,
     CurriculumVersion,
+    CurriculumVersionWithdrawal,
     OutcomeCompetencyLink,
     OutcomePCILink,
     OutcomeValueLink,
@@ -57,10 +67,12 @@ from curriculum.models import (
     SchoolUpdateAcknowledgement,
     SourceArtifact,
     SpecificLearningOutcome,
+    SchoolCurriculumAdoption,
     Strand,
     SubStrand,
     TeacherReadinessRequirement,
 )
+from events.services import write_outbox_event
 
 
 def _save_clean(instance: Any) -> Any:
@@ -72,6 +84,28 @@ def _save_clean(instance: Any) -> Any:
 def _require_active_reviewer(user: Any) -> None:
     if user is None or not getattr(user, "is_active", False):
         raise ValidationError({"reviewed_by": "An active reviewer is required."})
+
+
+def _record_curriculum_event_after_commit(
+    *,
+    event_type: str,
+    idempotency_key: str,
+    payload: dict[str, Any],
+    tenant: Any | None = None,
+    actor_id: Any | None = None,
+) -> None:
+    def _write_event() -> None:
+        write_outbox_event(
+            event_type=event_type,
+            event_version=1,
+            source_module="curriculum",
+            tenant=tenant,
+            actor_id=actor_id,
+            idempotency_key=idempotency_key,
+            payload=payload,
+        )
+
+    transaction.on_commit(_write_event)
 
 
 @transaction.atomic
@@ -298,6 +332,291 @@ def supersede_curriculum_publication(
     publication.is_active = False
     publication.superseded_by = superseded_by
     return _save_clean(publication)
+
+
+def _active_publication_for_version(
+    curriculum_version: CurriculumVersion,
+) -> CurriculumPublication | None:
+    return (
+        CurriculumPublication.objects.filter(
+            curriculum_version=curriculum_version,
+            is_active=True,
+        )
+        .order_by("-effective_from", "-published_at")
+        .first()
+    )
+
+
+def _version_is_withdrawn(curriculum_version: CurriculumVersion) -> bool:
+    return CurriculumVersionWithdrawal.objects.filter(
+        curriculum_version=curriculum_version,
+        status=CurriculumVersionWithdrawal.Status.WITHDRAWN,
+    ).exists()
+
+
+def _rubric_matches_curriculum_context(
+    *,
+    curriculum_version: CurriculumVersion,
+    learning_area: LearningArea | None,
+    rubric_foundation: AssessmentRubricFoundation | None,
+) -> bool:
+    if learning_area is None or rubric_foundation is None:
+        return False
+    if not getattr(rubric_foundation, "is_active", False):
+        return False
+    sub_strand = getattr(rubric_foundation, "sub_strand", None)
+    outcome = getattr(rubric_foundation, "learning_outcome", None)
+    if outcome is not None:
+        sub_strand = outcome.sub_strand
+    if sub_strand is None:
+        return False
+    curriculum_learning_area = sub_strand.strand.curriculum_learning_area
+    return (
+        curriculum_learning_area.curriculum_version_id == curriculum_version.id
+        and curriculum_learning_area.learning_area_id == learning_area.id
+        and curriculum_learning_area.is_active
+    )
+
+
+@transaction.atomic
+def schedule_school_curriculum_adoption(
+    *,
+    tenant: Any,
+    curriculum_version: CurriculumVersion,
+    effective_from: Any,
+    scheduled_by: Any,
+    notes: str = "",
+) -> SchoolCurriculumAdoption:
+    _require_active_reviewer(scheduled_by)
+    publication = _active_publication_for_version(curriculum_version)
+    if publication is None:
+        raise ValidationError(
+            {"curriculum_version": "Published curriculum version is required."}
+        )
+    validate_adoption_window(
+        publication_effective_from=publication.effective_from,
+        adoption_effective_from=effective_from,
+    )
+    adoption = _save_clean(
+        SchoolCurriculumAdoption(
+            tenant=tenant,
+            curriculum_version=curriculum_version,
+            effective_from=effective_from,
+            status=SchoolCurriculumAdoption.Status.SCHEDULED,
+            adopted_by=scheduled_by,
+            adopted_at=timezone.now(),
+            notes=notes,
+        )
+    )
+    _record_curriculum_event_after_commit(
+        event_type="curriculum.school_adoption_scheduled",
+        tenant=tenant,
+        actor_id=scheduled_by.id,
+        idempotency_key=f"curriculum-adoption-scheduled:{adoption.id}",
+        payload={
+            "tenant_id": str(tenant.id),
+            "curriculum_version_id": str(curriculum_version.id),
+            "adoption_id": str(adoption.id),
+            "effective_from": str(adoption.effective_from),
+        },
+    )
+    return adoption
+
+
+@transaction.atomic
+def activate_school_curriculum_adoption(
+    *,
+    adoption: SchoolCurriculumAdoption,
+    activated_by: Any,
+) -> SchoolCurriculumAdoption:
+    _require_active_reviewer(activated_by)
+    if _version_is_withdrawn(adoption.curriculum_version):
+        raise ValidationError(
+            {"curriculum_version": "Withdrawn curriculum cannot be activated."}
+        )
+    adoption.status = SchoolCurriculumAdoption.Status.ACTIVE
+    adoption.adopted_by = activated_by
+    adoption.adopted_at = timezone.now()
+    return _save_clean(adoption)
+
+
+@transaction.atomic
+def mark_curriculum_version_withdrawn(
+    *,
+    curriculum_version: CurriculumVersion,
+    withdrawn_by: Any,
+    reason: str,
+    replacement_version: CurriculumVersion | None = None,
+) -> CurriculumVersionWithdrawal:
+    _require_active_reviewer(withdrawn_by)
+    withdrawal = _save_clean(
+        CurriculumVersionWithdrawal(
+            curriculum_version=curriculum_version,
+            replacement_version=replacement_version,
+            status=CurriculumVersionWithdrawal.Status.WITHDRAWN,
+            reason=reason,
+            withdrawn_by=withdrawn_by,
+            withdrawn_at=timezone.now(),
+        )
+    )
+    _record_curriculum_event_after_commit(
+        event_type="curriculum.version_withdrawn",
+        tenant=None,
+        actor_id=withdrawn_by.id,
+        idempotency_key=f"curriculum-version-withdrawn:{withdrawal.id}",
+        payload={
+            "curriculum_version_id": str(curriculum_version.id),
+            "withdrawal_id": str(withdrawal.id),
+            "withdrawn_at": withdrawal.withdrawn_at.isoformat(),
+        },
+    )
+    return withdrawal
+
+
+@transaction.atomic
+def plan_curriculum_rollback(
+    *,
+    tenant: Any,
+    withdrawn_version: CurriculumVersion,
+    planned_by: Any,
+    reason: str,
+    target_version: CurriculumVersion | None = None,
+    affected_assessment_count: int = 0,
+) -> CurriculumRollbackPlan:
+    _require_active_reviewer(planned_by)
+    plan = _save_clean(
+        CurriculumRollbackPlan(
+            tenant=tenant,
+            withdrawn_version=withdrawn_version,
+            target_version=target_version,
+            reason=reason,
+            planned_by=planned_by,
+            affected_assessment_count=affected_assessment_count,
+        )
+    )
+    _record_curriculum_event_after_commit(
+        event_type="curriculum.rollback_planned",
+        tenant=tenant,
+        actor_id=planned_by.id,
+        idempotency_key=f"curriculum-rollback-planned:{plan.id}",
+        payload={
+            "tenant_id": str(tenant.id),
+            "rollback_plan_id": str(plan.id),
+            "withdrawn_version_id": str(withdrawn_version.id),
+            "target_version_id": str(target_version.id) if target_version else "",
+            "affected_assessment_count": affected_assessment_count,
+        },
+    )
+    return plan
+
+
+@transaction.atomic
+def create_notice_batch_run(
+    *,
+    notice_type: str,
+    total_count: int,
+    batch_size: int,
+    created_by: Any,
+    tenant: Any | None = None,
+    curriculum_version: CurriculumVersion | None = None,
+    notes: str = "",
+) -> CurriculumNoticeBatchRun:
+    _require_active_reviewer(created_by)
+    plan = plan_notice_batch(total_count=total_count, batch_size=batch_size)
+    batch = _save_clean(
+        CurriculumNoticeBatchRun(
+            tenant=tenant,
+            curriculum_version=curriculum_version,
+            notice_type=notice_type,
+            total_count=plan.total_count,
+            processed_count=0,
+            created_by=created_by,
+            notes=notes,
+        )
+    )
+    payload = {
+        "notice_batch_id": str(batch.id),
+        "notice_type": batch.notice_type,
+        "total_count": batch.total_count,
+        "batch_count": plan.batch_count,
+    }
+    if tenant is not None:
+        payload["tenant_id"] = str(tenant.id)
+    if curriculum_version is not None:
+        payload["curriculum_version_id"] = str(curriculum_version.id)
+    _record_curriculum_event_after_commit(
+        event_type="curriculum.notice_batch_created",
+        tenant=tenant,
+        actor_id=created_by.id,
+        idempotency_key=f"curriculum-notice-batch-created:{batch.id}",
+        payload=payload,
+    )
+    return batch
+
+
+def validate_curriculum_context_for_grading_binding(
+    *,
+    tenant: Any,
+    curriculum_version: CurriculumVersion | None,
+    learning_area: LearningArea | None,
+    rubric_foundation: AssessmentRubricFoundation | None,
+) -> None:
+    if tenant is None:
+        raise ValidationError({"tenant": "Tenant is required."})
+    if curriculum_version is None:
+        raise ValidationError({"curriculum_version": "Curriculum version required."})
+    adoption_exists = SchoolCurriculumAdoption.objects.filter(
+        tenant=tenant,
+        curriculum_version=curriculum_version,
+        status__in=[
+            SchoolCurriculumAdoption.Status.SCHEDULED,
+            SchoolCurriculumAdoption.Status.ACTIVE,
+        ],
+    ).exists()
+    result = validate_grading_dependency_state(
+        is_published=_active_publication_for_version(curriculum_version) is not None,
+        is_school_adopted=adoption_exists,
+        is_withdrawn=_version_is_withdrawn(curriculum_version),
+        has_learning_area_context=learning_area is not None
+        and getattr(learning_area, "tenant_id", None) == tenant.id,
+        has_rubric_context=_rubric_matches_curriculum_context(
+            curriculum_version=curriculum_version,
+            learning_area=learning_area,
+            rubric_foundation=rubric_foundation,
+        ),
+    )
+    if not result.is_allowed:
+        raise ValidationError({"curriculum_version": result.reason})
+
+
+def validate_curriculum_context_for_compilation_dependency(
+    *,
+    assessment: Any,
+) -> None:
+    result = validate_historical_dependency_state(
+        has_curriculum_version=bool(getattr(assessment, "curriculum_version_id", None)),
+        has_learning_area_context=bool(getattr(assessment, "learning_area_id", None)),
+        has_snapshot_context=bool(
+            getattr(assessment, "curriculum_binding_locked_at", None)
+        ),
+    )
+    if not result.is_allowed:
+        raise ValidationError({"curriculum_version": result.reason})
+
+
+def validate_curriculum_context_for_reporting_dependency(
+    *,
+    has_compiled_snapshot: bool,
+    has_preserved_curriculum_context: bool,
+    is_report_phase_enabled: bool = False,
+) -> None:
+    result = validate_reporting_dependency_state(
+        has_compiled_snapshot=has_compiled_snapshot,
+        has_preserved_curriculum_context=has_preserved_curriculum_context,
+        is_report_phase_enabled=is_report_phase_enabled,
+    )
+    if not result.is_allowed:
+        raise ValidationError({"reports": result.reason})
 
 
 @transaction.atomic

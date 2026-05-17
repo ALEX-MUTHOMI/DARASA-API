@@ -943,6 +943,337 @@ class CurriculumPublication(TimeStampedModel):
         return f"CurriculumPublication {self.pk}"
 
 
+class SchoolCurriculumAdoption(TimeStampedModel):
+    """Tenant-specific adoption state for a published curriculum version.
+
+    A national publication does not activate curriculum for every school.  This
+    record is the explicit school-level control-plane contract that grading and
+    later reporting dependencies can trust.
+    """
+
+    class Status(models.TextChoices):
+        SCHEDULED = "scheduled", _("Scheduled")
+        ACTIVE = "active", _("Active")
+        SUPERSEDED = "superseded", _("Superseded")
+        WITHDRAWN = "withdrawn", _("Withdrawn")
+        ROLLED_BACK = "rolled_back", _("Rolled back")
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    tenant = models.ForeignKey(
+        School,
+        on_delete=models.CASCADE,
+        related_name="curriculum_adoptions",
+    )
+    curriculum_version = models.ForeignKey(
+        CurriculumVersion,
+        on_delete=models.PROTECT,
+        related_name="school_adoptions",
+    )
+    status = models.CharField(
+        max_length=32,
+        choices=Status.choices,
+        default=Status.SCHEDULED,
+        db_index=True,
+    )
+    effective_from = models.DateField()
+    effective_to = models.DateField(null=True, blank=True)
+    adopted_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="scheduled_curriculum_adoptions",
+    )
+    adopted_at = models.DateTimeField(null=True, blank=True)
+    notes = models.TextField(blank=True)
+
+    class Meta(TimeStampedModel.Meta):
+        verbose_name = _("School curriculum adoption")
+        verbose_name_plural = _("School curriculum adoptions")
+        constraints = [
+            models.UniqueConstraint(
+                fields=["tenant", "curriculum_version"],
+                condition=Q(status__in=["scheduled", "active"]),
+                name="curr_adopt_active_unique",
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=["tenant", "status", "effective_from"],
+                name="curr_adopt_tenant_status_idx",
+            ),
+            models.Index(
+                fields=["curriculum_version", "status"],
+                name="curr_adopt_version_idx",
+            ),
+        ]
+
+    def clean(self) -> None:
+        super().clean()
+        if self.notes:
+            validate_governance_text(self.notes)
+            self.notes = self.notes.strip()
+        if self.effective_to and self.effective_to < self.effective_from:
+            raise ValidationError(
+                {"effective_to": _("Adoption end date must follow start date.")}
+            )
+        if self.status in {self.Status.SCHEDULED, self.Status.ACTIVE}:
+            if not self.curriculum_version.is_active:
+                raise ValidationError(
+                    {"curriculum_version": _("Curriculum version is inactive.")}
+                )
+            if not CurriculumPublication.objects.filter(
+                curriculum_version=self.curriculum_version,
+                is_active=True,
+            ).exists():
+                raise ValidationError(
+                    {"curriculum_version": _("Published curriculum is required.")}
+                )
+            if CurriculumVersionWithdrawal.objects.filter(
+                curriculum_version=self.curriculum_version,
+                status=CurriculumVersionWithdrawal.Status.WITHDRAWN,
+            ).exists():
+                raise ValidationError(
+                    {"curriculum_version": _("Withdrawn curriculum cannot be adopted.")}
+                )
+        if self.adopted_by_id and not self.adopted_by.is_active:
+            raise ValidationError({"adopted_by": _("Adoption actor must be active.")})
+
+    def save(self, *args: Any, **kwargs: Any) -> Any:
+        self.full_clean()
+        return super().save(*args, **kwargs)
+
+    def __str__(self) -> str:
+        return f"SchoolCurriculumAdoption {self.pk}"
+
+
+class CurriculumVersionWithdrawal(TimeStampedModel):
+    """Auditable withdrawal marker that blocks new adoption.
+
+    Withdrawal records do not rewrite historical grading or compilation state.
+    """
+
+    class Status(models.TextChoices):
+        PLANNED = "planned", _("Planned")
+        WITHDRAWN = "withdrawn", _("Withdrawn")
+        CANCELLED = "cancelled", _("Cancelled")
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    curriculum_version = models.ForeignKey(
+        CurriculumVersion,
+        on_delete=models.PROTECT,
+        related_name="withdrawals",
+    )
+    replacement_version = models.ForeignKey(
+        CurriculumVersion,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="replacement_for_withdrawals",
+    )
+    status = models.CharField(
+        max_length=32,
+        choices=Status.choices,
+        default=Status.PLANNED,
+        db_index=True,
+    )
+    reason = models.TextField()
+    withdrawn_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="withdrawn_curriculum_versions",
+    )
+    withdrawn_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta(TimeStampedModel.Meta):
+        verbose_name = _("Curriculum version withdrawal")
+        verbose_name_plural = _("Curriculum version withdrawals")
+        indexes = [
+            models.Index(
+                fields=["curriculum_version", "status"],
+                name="curr_withdraw_version_idx",
+            ),
+        ]
+
+    def clean(self) -> None:
+        super().clean()
+        validate_governance_text(self.reason)
+        self.reason = self.reason.strip()
+        if self.replacement_version_id == self.curriculum_version_id:
+            raise ValidationError(
+                {"replacement_version": _("Replacement version must differ.")}
+            )
+        if self.withdrawn_by_id and not self.withdrawn_by.is_active:
+            raise ValidationError({"withdrawn_by": _("Withdrawal actor is inactive.")})
+
+    def save(self, *args: Any, **kwargs: Any) -> Any:
+        self.full_clean()
+        return super().save(*args, **kwargs)
+
+    def __str__(self) -> str:
+        return f"CurriculumVersionWithdrawal {self.pk}"
+
+
+class CurriculumRollbackPlan(TimeStampedModel):
+    """Controlled rollback plan for tenant-scoped adoption changes.
+
+    Rollback planning records intended operational changes.  It deliberately
+    does not mutate assessments, grade records, or compiled snapshots.
+    """
+
+    class Status(models.TextChoices):
+        PLANNED = "planned", _("Planned")
+        APPROVED = "approved", _("Approved")
+        EXECUTED = "executed", _("Executed")
+        CANCELLED = "cancelled", _("Cancelled")
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    tenant = models.ForeignKey(
+        School,
+        on_delete=models.CASCADE,
+        related_name="curriculum_rollback_plans",
+    )
+    withdrawn_version = models.ForeignKey(
+        CurriculumVersion,
+        on_delete=models.PROTECT,
+        related_name="rollback_plans_as_withdrawn",
+    )
+    target_version = models.ForeignKey(
+        CurriculumVersion,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="rollback_plans_as_target",
+    )
+    status = models.CharField(
+        max_length=32,
+        choices=Status.choices,
+        default=Status.PLANNED,
+        db_index=True,
+    )
+    reason = models.TextField()
+    planned_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="planned_curriculum_rollbacks",
+    )
+    planned_at = models.DateTimeField(auto_now_add=True)
+    executed_at = models.DateTimeField(null=True, blank=True)
+    affected_assessment_count = models.PositiveIntegerField(default=0)
+
+    class Meta(TimeStampedModel.Meta):
+        verbose_name = _("Curriculum rollback plan")
+        verbose_name_plural = _("Curriculum rollback plans")
+        indexes = [
+            models.Index(
+                fields=["tenant", "status", "planned_at"],
+                name="curr_rollback_tenant_idx",
+            ),
+        ]
+
+    def clean(self) -> None:
+        super().clean()
+        validate_governance_text(self.reason)
+        self.reason = self.reason.strip()
+        if self.target_version_id == self.withdrawn_version_id:
+            raise ValidationError({"target_version": _("Target version must differ.")})
+        if self.planned_by_id and not self.planned_by.is_active:
+            raise ValidationError({"planned_by": _("Planner must be active.")})
+
+    def save(self, *args: Any, **kwargs: Any) -> Any:
+        self.full_clean()
+        return super().save(*args, **kwargs)
+
+    def __str__(self) -> str:
+        return f"CurriculumRollbackPlan {self.pk}"
+
+
+class CurriculumNoticeBatchRun(TimeStampedModel):
+    """Batchable notice issuance record for national-scale CCT operations."""
+
+    class NoticeType(models.TextChoices):
+        PRINCIPAL_EVIDENCE = "principal_evidence", _("Principal evidence")
+        TEACHER_READINESS = "teacher_readiness", _("Teacher readiness")
+        ADOPTION = "adoption", _("Adoption")
+        WITHDRAWAL = "withdrawal", _("Withdrawal")
+
+    class Status(models.TextChoices):
+        PLANNED = "planned", _("Planned")
+        PROCESSING = "processing", _("Processing")
+        COMPLETED = "completed", _("Completed")
+        FAILED = "failed", _("Failed")
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    tenant = models.ForeignKey(
+        School,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="curriculum_notice_batches",
+    )
+    curriculum_version = models.ForeignKey(
+        CurriculumVersion,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="notice_batch_runs",
+    )
+    notice_type = models.CharField(max_length=32, choices=NoticeType.choices)
+    status = models.CharField(
+        max_length=32,
+        choices=Status.choices,
+        default=Status.PLANNED,
+        db_index=True,
+    )
+    total_count = models.PositiveIntegerField(default=0)
+    processed_count = models.PositiveIntegerField(default=0)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="created_curriculum_notice_batches",
+    )
+    notes = models.TextField(blank=True)
+
+    class Meta(TimeStampedModel.Meta):
+        verbose_name = _("Curriculum notice batch run")
+        verbose_name_plural = _("Curriculum notice batch runs")
+        indexes = [
+            models.Index(
+                fields=["status", "notice_type", "created_at"],
+                name="curr_notice_batch_idx",
+            ),
+            models.Index(
+                fields=["tenant", "status"],
+                name="curr_notice_tenant_idx",
+            ),
+        ]
+
+    def clean(self) -> None:
+        super().clean()
+        if self.processed_count > self.total_count:
+            raise ValidationError(
+                {"processed_count": _("Processed count cannot exceed total count.")}
+            )
+        if self.notes:
+            validate_governance_text(self.notes)
+            self.notes = self.notes.strip()
+        if self.created_by_id and not self.created_by.is_active:
+            raise ValidationError({"created_by": _("Batch creator must be active.")})
+
+    def save(self, *args: Any, **kwargs: Any) -> Any:
+        self.full_clean()
+        return super().save(*args, **kwargs)
+
+    def __str__(self) -> str:
+        return f"CurriculumNoticeBatchRun {self.pk}"
+
+
 class CurriculumDiff(TimeStampedModel):
     class Status(models.TextChoices):
         DRAFT = "draft", _("Draft")

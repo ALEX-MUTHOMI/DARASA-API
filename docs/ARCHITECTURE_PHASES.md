@@ -61,6 +61,13 @@ learning-area summaries, and role-aware backend projections. One academic truth
 feeds teacher, HOD, deputy/head, principal, and future parent-safe views.
 Reports, PDFs, parent portal UI, and NLP remain future phases.
 
+CCT Fortification strengthens the existing Curriculum Change Tracker into the
+curriculum control plane that later readiness dashboards and reports can depend
+on. It adds tenant-specific school adoption, withdrawal, rollback planning,
+bounded notice batches, and dependency guards for grading, compilation, and
+future reporting. It does not rebuild CCT, crawl live sources, interpret
+curriculum with AI, or change historical grading/compilation records.
+
 ## Active Boundary Rules
 
 The default test command now includes Phase 1 through Phase 6C work and
@@ -77,3 +84,8 @@ evidence so a future ingestion layer can be reviewed separately.
 Principal acknowledgement is not activation. A school can acknowledge an update
 without Darasa changing active curriculum records, schemes, assessment behavior,
 or learner records.
+
+Published curriculum is not school adoption. New grading assessments require a
+published version that the tenant has explicitly adopted. Existing operational
+assessments, submitted grades, and compiled snapshots preserve their original
+curriculum context if CCT later publishes, withdraws, or rolls back a version.

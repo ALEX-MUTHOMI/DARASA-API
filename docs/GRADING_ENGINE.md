@@ -18,6 +18,12 @@ binding timestamp so old grade records remain tied to the assessment context
 that existed when grading began. Later CCT updates do not mutate old
 assessments or grade records.
 
+Publication is not enough for new grading work. CCT records explicit
+tenant-specific school adoption, and new operational assessments require both
+published curriculum truth and school adoption. Withdrawn curriculum versions
+cannot be used for new assessment bindings. Existing operational assessments
+keep their historical context after withdrawal or rollback planning.
+
 The teacher grade-entry selector returns only assigned, open, CBE/CCT-bound
 assessments. Draft management belongs on a separate future read path; it must
 not be mixed with grade entry.

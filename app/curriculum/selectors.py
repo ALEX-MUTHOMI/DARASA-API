@@ -15,14 +15,18 @@ from curriculum.models import (
     CurriculumDiffItem,
     CurriculumImpact,
     CurriculumLearningArea,
+    CurriculumNoticeBatchRun,
     CurriculumPublication,
+    CurriculumRollbackPlan,
     CurriculumSourceDocument,
     CurriculumVersion,
+    CurriculumVersionWithdrawal,
     CurriculumValue,
     PertinentContemporaryIssue,
     PrincipalNotificationEvidenceCard,
     RegulatoryNotice,
     SchoolUpdateAcknowledgement,
+    SchoolCurriculumAdoption,
     SourceArtifact,
     SpecificLearningOutcome,
     Strand,
@@ -194,6 +198,71 @@ def get_active_curriculum_publication() -> CurriculumPublication | None:
         .order_by("-effective_from", "-published_at")
         .first()
     )
+
+
+def get_active_school_curriculum_adoption(
+    *,
+    tenant: School,
+    curriculum_version: CurriculumVersion,
+) -> SchoolCurriculumAdoption | None:
+    return (
+        SchoolCurriculumAdoption.objects.filter(
+            tenant=tenant,
+            curriculum_version=curriculum_version,
+            status__in=[
+                SchoolCurriculumAdoption.Status.SCHEDULED,
+                SchoolCurriculumAdoption.Status.ACTIVE,
+            ],
+        )
+        .select_related("tenant", "curriculum_version")
+        .order_by("-effective_from", "-created_at")
+        .first()
+    )
+
+
+def get_school_adoption_status(
+    *,
+    tenant: School,
+) -> QuerySet[SchoolCurriculumAdoption]:
+    return (
+        SchoolCurriculumAdoption.objects.filter(tenant=tenant)
+        .select_related("tenant", "curriculum_version")
+        .order_by("-effective_from", "-created_at")
+    )
+
+
+def get_withdrawn_curriculum_versions() -> QuerySet[CurriculumVersionWithdrawal]:
+    return (
+        CurriculumVersionWithdrawal.objects.filter(
+            status=CurriculumVersionWithdrawal.Status.WITHDRAWN,
+        )
+        .select_related("curriculum_version", "replacement_version")
+        .order_by("-withdrawn_at", "-created_at")
+    )
+
+
+def get_curriculum_rollback_plans(
+    *,
+    tenant: School,
+) -> QuerySet[CurriculumRollbackPlan]:
+    return (
+        CurriculumRollbackPlan.objects.filter(tenant=tenant)
+        .select_related("tenant", "withdrawn_version", "target_version")
+        .order_by("-planned_at")
+    )
+
+
+def get_curriculum_notice_batch_runs(
+    *,
+    tenant: School | None = None,
+) -> QuerySet[CurriculumNoticeBatchRun]:
+    queryset = CurriculumNoticeBatchRun.objects.select_related(
+        "tenant",
+        "curriculum_version",
+    )
+    if tenant is not None:
+        queryset = queryset.filter(tenant=tenant)
+    return queryset.order_by("-created_at")
 
 
 def get_curriculum_publication_history(

@@ -54,6 +54,19 @@ compilation transaction commits. The payload is reference-only: tenant,
 assessment, compilation run, cohort, learning area, curriculum version, status,
 and compiled time. Do not emit one event per learner, component, or score.
 
+## CCT Control-Plane Events
+
+CCT fortification adds reference-only governance facts:
+`curriculum.school_adoption_scheduled`, `curriculum.version_withdrawn`,
+`curriculum.rollback_planned`, and `curriculum.notice_batch_created`. They use
+`event_version=1`, are producer-allowlisted to `curriculum`, and carry IDs,
+counts, statuses, and dates only.
+
+Do not put raw circular text, uploaded file content, student data, grade marks,
+learner names, report text, or NLP output in CCT event payloads. National notice
+issuance must use bounded batch-level facts, not one event per school or
+teacher.
+
 ## Ownership
 
 Changes under `app/events`, event docs, CI, Docker, settings, and scripts should

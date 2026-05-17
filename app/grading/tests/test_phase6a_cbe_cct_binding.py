@@ -14,6 +14,7 @@ from curriculum.models import (
     CurriculumPublication,
     CurriculumSourceDocument,
     CurriculumVersion,
+    SchoolCurriculumAdoption,
     SpecificLearningOutcome,
     Strand,
     SubStrand,
@@ -55,6 +56,13 @@ def _create_second_curriculum_context(
         curriculum_version=version,
         effective_from="2027-01-01",
         publication_notes="Approved later curriculum fixture.",
+    )
+    SchoolCurriculumAdoption.objects.create(
+        tenant=learning_area.tenant,
+        curriculum_version=version,
+        effective_from="2027-01-01",
+        status=SchoolCurriculumAdoption.Status.ACTIVE,
+        notes="Fixture adoption for historical binding tests.",
     )
     area = CurriculumLearningArea.objects.create(
         curriculum_version=version,

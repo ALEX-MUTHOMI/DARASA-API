@@ -26,6 +26,18 @@ affects school operations. Source registration, review, publication, principal
 notification, and acknowledgement are separate operations. This prevents
 mass-assignment shortcuts and preserves audit evidence.
 
+CCT distinguishes detected, quarantined, verified, published, school-adopted,
+withdrawn, and rolled-back states. A national publication is not a tenant
+activation. Schools must schedule or activate adoption explicitly, and new
+grading bindings fail closed unless the tenant has adopted the published
+version. Withdrawals block new adoption but do not mutate old assessments,
+grade records, or compiled snapshots.
+
+Curriculum rollout and notice issuance must be batchable. CCT may create
+principal evidence cards, teacher readiness notices, adoption records,
+withdrawal records, rollback plans, and notice batch runs; it must not fan out
+unbounded synchronous work to all schools or all learners.
+
 ## Secrets and PII
 
 Production secrets must come from environment variables. Fernet configuration is
@@ -77,3 +89,7 @@ facts and remain tenant/policy scoped; they may filter and shape data, but they
 must not recalculate academic meaning per role. HOD compilation visibility is
 assignment-scoped until a department ownership model exists. Future parent
 projection remains fail-closed until guardian-learner mapping is modeled.
+
+After CCT fortification, grading and compilation consume CCT through explicit
+dependency guards. Future reports must consume compiled snapshots with their
+preserved curriculum context instead of re-resolving live curriculum truth.

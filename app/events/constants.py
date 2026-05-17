@@ -123,6 +123,72 @@ INITIAL_EVENT_CONTRACTS = [
         "priority": "normal",
     },
     {
+        "event_type": "curriculum.school_adoption_scheduled",
+        "event_version": 1,
+        "description": "A school scheduled adoption of a published curriculum.",
+        "source_module": "curriculum",
+        "allowed_producers": ["curriculum"],
+        "allowed_consumers": ["audit"],
+        "requires_tenant": True,
+        "payload_schema": {
+            "required": [
+                "tenant_id",
+                "curriculum_version_id",
+                "adoption_id",
+                "effective_from",
+            ]
+        },
+        "priority": "normal",
+    },
+    {
+        "event_type": "curriculum.version_withdrawn",
+        "event_version": 1,
+        "description": "A curriculum version was withdrawn from new adoption.",
+        "source_module": "curriculum",
+        "allowed_producers": ["curriculum"],
+        "allowed_consumers": ["audit"],
+        "requires_tenant": False,
+        "payload_schema": {
+            "required": [
+                "curriculum_version_id",
+                "withdrawal_id",
+                "withdrawn_at",
+            ]
+        },
+        "priority": "high",
+    },
+    {
+        "event_type": "curriculum.rollback_planned",
+        "event_version": 1,
+        "description": "A tenant-scoped curriculum rollback plan was recorded.",
+        "source_module": "curriculum",
+        "allowed_producers": ["curriculum"],
+        "allowed_consumers": ["audit"],
+        "requires_tenant": True,
+        "payload_schema": {
+            "required": [
+                "tenant_id",
+                "rollback_plan_id",
+                "withdrawn_version_id",
+                "affected_assessment_count",
+            ]
+        },
+        "priority": "high",
+    },
+    {
+        "event_type": "curriculum.notice_batch_created",
+        "event_version": 1,
+        "description": "A bounded curriculum notice batch was created.",
+        "source_module": "curriculum",
+        "allowed_producers": ["curriculum"],
+        "allowed_consumers": ["audit"],
+        "requires_tenant": False,
+        "payload_schema": {
+            "required": ["notice_batch_id", "notice_type", "total_count"]
+        },
+        "priority": "normal",
+    },
+    {
         "event_type": "grading.batch_submitted",
         "event_version": 1,
         "description": "A teacher submitted one CBE-bound grading batch.",

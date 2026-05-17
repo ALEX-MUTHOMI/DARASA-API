@@ -15,6 +15,7 @@ from curriculum.models import (
     CurriculumLearningArea,
     PrincipalNotificationEvidenceCard,
     SpecificLearningOutcome,
+    TeacherReadinessRequirement,
 )
 
 
@@ -171,6 +172,43 @@ def can_supersede_curriculum_version(context: PolicyContext) -> bool:
     )
 
 
+def can_schedule_school_adoption(context: PolicyContext) -> bool:
+    return (
+        context.action == "curriculum.cct.schedule_adoption"
+        and _is_manager(context)
+    )
+
+
+def can_plan_curriculum_rollback(context: PolicyContext) -> bool:
+    return (
+        context.action == "curriculum.cct.plan_rollback"
+        and _is_manager(context)
+    )
+
+
+def can_view_curriculum_impact(context: PolicyContext) -> bool:
+    return (
+        context.action == "curriculum.cct.view_impact"
+        and _context_is_valid(context)
+        and context.role.code in CURRICULUM_VIEW_ROLES
+    )
+
+
+def can_view_evidence_artifact(context: PolicyContext) -> bool:
+    return (
+        context.action == "curriculum.cct.view_evidence"
+        and _context_is_valid(context)
+        and context.role.code in CURRICULUM_VIEW_ROLES
+    )
+
+
+def can_resolve_dependent_app_context(context: PolicyContext) -> bool:
+    return (
+        context.action == "curriculum.cct.resolve_dependent_context"
+        and _is_manager(context)
+    )
+
+
 def can_view_regulatory_notice(context: PolicyContext) -> bool:
     return (
         context.action == "curriculum.regulatory.view"
@@ -232,3 +270,23 @@ def can_view_teacher_readiness_requirement(context: PolicyContext) -> bool:
         and _context_is_valid(context)
         and context.role.code in CURRICULUM_VIEW_ROLES
     )
+
+
+def can_view_teacher_readiness_notice(
+    context: PolicyContext,
+    *,
+    requirement: TeacherReadinessRequirement,
+) -> bool:
+    if not can_view_teacher_readiness_requirement(context):
+        return False
+    if context.role.code in CURRICULUM_MANAGE_ROLES:
+        return True
+    if requirement.affected_learning_area_id is None:
+        return False
+    return TeacherAssignment.objects.filter(
+        tenant=context.tenant,
+        teacher=context.actor,
+        learning_area=requirement.affected_learning_area,
+        is_active=True,
+        learning_area__is_active=True,
+    ).exists()

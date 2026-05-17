@@ -23,6 +23,7 @@ from curriculum.models import (
     CurriculumPublication,
     CurriculumSourceDocument,
     CurriculumVersion,
+    SchoolCurriculumAdoption,
     SpecificLearningOutcome,
     Strand,
     SubStrand,
@@ -198,12 +199,20 @@ def curriculum_version(curriculum_source_document) -> CurriculumVersion:
 
 
 @pytest.fixture
-def curriculum_publication(curriculum_version) -> CurriculumPublication:
-    return CurriculumPublication.objects.create(
+def curriculum_publication(school, curriculum_version) -> CurriculumPublication:
+    publication = CurriculumPublication.objects.create(
         curriculum_version=curriculum_version,
         effective_from="2026-01-01",
         publication_notes="Approved official curriculum fixture.",
     )
+    SchoolCurriculumAdoption.objects.create(
+        tenant=school,
+        curriculum_version=curriculum_version,
+        effective_from="2026-01-01",
+        status=SchoolCurriculumAdoption.Status.ACTIVE,
+        notes="Fixture adoption for grading dependency tests.",
+    )
+    return publication
 
 
 @pytest.fixture

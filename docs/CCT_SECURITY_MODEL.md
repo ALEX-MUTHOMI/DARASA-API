@@ -40,6 +40,24 @@ reviewed versions, while notification evidence cards inform principals. A
 principal acknowledgement records that the school has seen the evidence; it does
 not activate curriculum or mutate school operations.
 
+## National Control Plane Fortification
+
+CCT is Darasa's curriculum control plane for dependent apps. Detected evidence,
+verified change sets, national publication, and school adoption are separate
+states. A published version is not globally active for every school; each tenant
+gets an explicit `SchoolCurriculumAdoption` record before new operational
+assessments may bind to that version.
+
+Withdrawals and rollback plans are auditable control-plane records. They block
+new adoption or new grading bindings, but they do not rewrite old assessments,
+grade records, compilation runs, compiled learner snapshots, or cohort
+summaries. Historical academic facts keep the CBE/CCT context that governed the
+assessment when grading began.
+
+Principal evidence notices and teacher readiness notices remain evidence-backed
+and tenant or assignment scoped. National-scale rollout must use bounded notice
+batches rather than synchronous fan-out to every school.
+
 ## Senior School Intelligence
 
 Phase 4C focuses on Senior School impact and tracks Junior-to-Senior signals
