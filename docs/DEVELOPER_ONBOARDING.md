@@ -4,7 +4,7 @@ Start with the Docker workflow because it matches CI.
 
 ```bash
 docker compose config -q
-docker compose run --rm django bash /workspace/scripts/run-tests.sh unit
+docker compose run --rm django bash /workspace/scripts/run-tests.sh patch
 docker compose run --rm django bash -c "cd /workspace/app && python manage.py check"
 ```
 
@@ -12,11 +12,30 @@ Host Poetry is optional for day-to-day work. If you use it locally, install the
 same dependency groups declared in `pyproject.toml` and select the Poetry
 interpreter in VS Code.
 
+## Test Gates
+
+Darasa uses layered gates to avoid wasting hours during normal iteration while
+keeping phase closeout strict.
+
+```bash
+docker compose run --rm django bash /workspace/scripts/run-tests.sh patch
+docker compose run --rm django bash /workspace/scripts/run-tests.sh domain curriculum
+docker compose run --rm django bash /workspace/scripts/run-tests.sh full
+docker compose run --rm django bash /workspace/scripts/run-tests.sh deep
+```
+
+Patch/Turbo Pass is a developer-feedback gate, not a merge/release gate. Use
+Domain Gates after changing curriculum, grading, events, core, tenant, or
+academics. Use Full Gate for phase closeout. Use Deep Gate for CCT, grading,
+security, red-team, performance, and production-risk closeouts.
+
+See `docs/TESTING_STRATEGY.md` for the Codex routing rules.
+
 ## Phase Markers
 
-Default tests include Phase 1 through Phase 4C. Future phases, integration-heavy
-tests, and chaos tests are opt-in. Do not remove phase markers to make tests
-pass; fix the boundary or the implementation.
+Default tests include the active phase surface. Future phases,
+integration-heavy tests, and chaos tests are opt-in. Do not remove phase or
+security markers to make tests pass; fix the boundary or the implementation.
 
 ## Migration Discipline
 

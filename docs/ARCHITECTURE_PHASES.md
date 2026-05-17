@@ -77,8 +77,12 @@ requires infrastructure rate limits and monitoring.
 
 ## Active Boundary Rules
 
-The default test command now includes Phase 1 through Phase 6C work and
+The default unit test command includes Phase 1 through Phase 6C work and
 continues to exclude future markers, integration-heavy tests, and chaos tests.
+Darasa also has explicit test gates: Patch/Turbo for fast feedback, Domain for
+changed-domain verification, Full for phase closeout, and Deep for
+security/red-team/performance sweeps. Patch/Turbo is not a merge or release
+gate; Full remains the authoritative source of truth.
 
 The grading app is intentionally active for Phase 6A and later. Future report,
 scheme, lesson-assistant, external broker, crawler, and AI-parser work remains
