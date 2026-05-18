@@ -72,6 +72,19 @@ Future evidence uploads require private malware-scan-ready storage, checksum
 fingerprinting, MIME verification, file size limits, rate limits, and audit
 logs before production use.
 
+The CCT evidence model includes explicit malware-scan and content-verification
+readiness states. Those states are infrastructure-derived, not client-derived.
+Governance approval for publication requires clean malware status and passed
+content verification; a high confidence document report, stamp signal,
+signature signal, duplicate cluster, or expired 24-hour SLA cannot override a
+pending, suspicious, infected, unavailable, failed, or unsupported upload
+readiness state.
+
+Evidence submission is a production step-up action. Before public upload
+endpoints exist, Darasa must bind step-up confirmation to the same actor and
+tenant, expire it, rate-limit it, and avoid storing raw passwords, PINs, or
+device secrets.
+
 ## Event Backbone
 
 Events are typed, versioned facts. Producers are allowlisted, tenant-scoped

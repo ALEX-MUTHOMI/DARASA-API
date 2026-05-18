@@ -1302,6 +1302,19 @@ class CurriculumEvidenceSubmission(TimeStampedModel):
         REJECTED = "rejected", _("Rejected")
         GOVERNANCE_READY = "governance_ready", _("Governance ready")
 
+    class MalwareScanStatus(models.TextChoices):
+        PENDING = "pending", _("Pending")
+        CLEAN = "clean", _("Clean")
+        SUSPICIOUS = "suspicious", _("Suspicious")
+        INFECTED = "infected", _("Infected")
+        UNAVAILABLE = "unavailable", _("Unavailable")
+
+    class ContentVerificationStatus(models.TextChoices):
+        PENDING = "pending", _("Pending")
+        PASSED = "passed", _("Passed")
+        FAILED = "failed", _("Failed")
+        UNSUPPORTED = "unsupported", _("Unsupported")
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     tenant = models.ForeignKey(
         School,
@@ -1327,11 +1340,24 @@ class CurriculumEvidenceSubmission(TimeStampedModel):
         default=Status.QUARANTINED,
         db_index=True,
     )
+    storage_backend = models.CharField(max_length=64, default="private_internal")
     storage_reference = models.CharField(max_length=500)
     file_name = models.CharField(max_length=255)
     content_type = models.CharField(max_length=128)
     size_bytes = models.PositiveIntegerField()
     file_checksum = models.CharField(max_length=96)
+    malware_scan_status = models.CharField(
+        max_length=32,
+        choices=MalwareScanStatus.choices,
+        default=MalwareScanStatus.PENDING,
+        db_index=True,
+    )
+    content_verification_status = models.CharField(
+        max_length=32,
+        choices=ContentVerificationStatus.choices,
+        default=ContentVerificationStatus.PENDING,
+        db_index=True,
+    )
     evidence_fingerprint = models.CharField(max_length=96, db_index=True)
     duplicate_cluster_id = models.UUIDField(default=uuid.uuid4, db_index=True)
     duplicate_of = models.ForeignKey(
@@ -1373,6 +1399,9 @@ class CurriculumEvidenceSubmission(TimeStampedModel):
         super().clean()
         self.submitter_role = _validate_optional_governance_text(
             self.submitter_role
+        )
+        self.storage_backend = _validate_optional_governance_text(
+            self.storage_backend
         )
         self.file_name = _validate_optional_governance_text(self.file_name)
         self.claimed_authority = _validate_optional_governance_text(

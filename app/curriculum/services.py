@@ -166,6 +166,29 @@ def _require_governance_approver(user: Any, tenant: Any) -> None:
         raise ValidationError({"actor": "Curriculum governance role is required."})
 
 
+def _require_evidence_ready_for_approval(
+    evidence_submission: CurriculumEvidenceSubmission,
+) -> None:
+    if (
+        evidence_submission.malware_scan_status
+        != CurriculumEvidenceSubmission.MalwareScanStatus.CLEAN
+    ):
+        raise ValidationError(
+            {"malware_scan_status": "Clean malware scan is required."}
+        )
+    if (
+        evidence_submission.content_verification_status
+        != CurriculumEvidenceSubmission.ContentVerificationStatus.PASSED
+    ):
+        raise ValidationError(
+            {
+                "content_verification_status": (
+                    "Passed content verification is required."
+                )
+            }
+        )
+
+
 def _record_curriculum_event_after_commit(
     *,
     event_type: str,
@@ -784,7 +807,7 @@ def create_curriculum_verification_report(
     signature_signal: bool = False,
     template_signal: bool = False,
 ) -> CurriculumVerificationReport:
-    _require_curriculum_truth_manager(actor)
+    _require_governance_approver(actor, tenant)
     if evidence_submission.tenant_id != tenant.id:
         raise ValidationError({"tenant": "Evidence tenant is invalid."})
     signals = validate_document_signals(
@@ -903,6 +926,13 @@ def record_governance_decision(
         report_status=verification_report.review_status,
         reason=reason,
     )
+    if (
+        normalized_decision
+        == CurriculumGovernanceDecision.Decision.APPROVED_FOR_PUBLICATION
+    ):
+        _require_evidence_ready_for_approval(
+            verification_report.evidence_submission
+        )
     governance_decision = _save_clean(
         CurriculumGovernanceDecision(
             tenant=tenant,

@@ -80,6 +80,12 @@ CCT full-proofing adds `curriculum.evidence_submitted`,
 rollback curriculum. Payloads contain reference IDs, status, confidence level
 where applicable, and timestamps only.
 
+Malware scan and content-verification details are production-readiness state on
+the evidence record, not event bodies. Events may reference the evidence or
+decision ID, but they must not include scanner output, content-sniffing traces,
+document excerpts, or uploaded file metadata beyond the compact status fields
+allowed by the event contract.
+
 Evidence events must never include raw circular text, uploaded file bytes,
 HTML bodies, source document bodies, student or learner data, grade marks,
 component scores, report text, guardian contacts, teacher private notes, or

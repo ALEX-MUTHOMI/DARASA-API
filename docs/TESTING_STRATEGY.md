@@ -70,6 +70,9 @@ audits and targeted drift scans. It should not run after every Codex edit.
 - CCT/curriculum change: run Patch Gate, then `domain curriculum`.
 - CCT full-proofing, upload-security, or governance change: run Patch Gate,
   `domain curriculum`, Full Gate, and Deep Gate before closeout.
+- CCT production-readiness change: keep malware/content-readiness, event
+  payload, no-crawler, phase-boundary, and non-mutating history tests reachable
+  from `domain curriculum` or Deep Gate.
 - Grading change: run Patch Gate, then `domain grading`.
 - Event contract change: run Patch Gate, then `domain events`.
 - Security-sensitive change: run the relevant Domain Gate; run Deep Gate if

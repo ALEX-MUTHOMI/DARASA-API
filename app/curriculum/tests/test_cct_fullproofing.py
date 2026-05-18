@@ -9,6 +9,7 @@ from django.utils import timezone
 
 from core.models import CustomUser, Role, TenantUserRole
 from core.policies import PolicyContext
+from curriculum.algorithms.evidence_fingerprint import fingerprint_payload
 from curriculum.models import (
     CurriculumAppImpactPlan,
     CurriculumEvidenceSubmission,
@@ -100,6 +101,25 @@ def _authority():
     )
 
 
+def _mark_evidence_upload_ready(
+    submission: CurriculumEvidenceSubmission,
+) -> CurriculumEvidenceSubmission:
+    submission.malware_scan_status = (
+        CurriculumEvidenceSubmission.MalwareScanStatus.CLEAN
+    )
+    submission.content_verification_status = (
+        CurriculumEvidenceSubmission.ContentVerificationStatus.PASSED
+    )
+    submission.save(
+        update_fields=[
+            "malware_scan_status",
+            "content_verification_status",
+            "updated_at",
+        ]
+    )
+    return submission
+
+
 def test_principal_and_deputy_submit_quarantined_evidence_but_teacher_denied(
     principal_role,
     principal_user,
@@ -119,7 +139,12 @@ def test_principal_and_deputy_submit_quarantined_evidence_but_teacher_denied(
     principal_submission = submit_curriculum_evidence(
         actor=principal_user,
         tenant=school,
-        payload={**_payload(), "status": "governance_ready"},
+        payload={
+            **_payload(),
+            "status": "governance_ready",
+            "malware_scan_status": "clean",
+            "content_verification_status": "passed",
+        },
     )
     deputy_submission = submit_curriculum_evidence(
         actor=deputy,
@@ -133,6 +158,14 @@ def test_principal_and_deputy_submit_quarantined_evidence_but_teacher_denied(
     assert (
         principal_submission.status
         == CurriculumEvidenceSubmission.Status.QUARANTINED
+    )
+    assert (
+        principal_submission.malware_scan_status
+        == CurriculumEvidenceSubmission.MalwareScanStatus.PENDING
+    )
+    assert (
+        principal_submission.content_verification_status
+        == CurriculumEvidenceSubmission.ContentVerificationStatus.PENDING
     )
     assert deputy_submission.status == CurriculumEvidenceSubmission.Status.QUARANTINED
     assert principal_submission.evidence_fingerprint.startswith("sha256:")
@@ -168,6 +201,19 @@ def test_duplicate_evidence_clusters_by_document_identity_not_storage(
         duplicate,
         first,
     ]
+
+
+def test_thousand_storage_replays_share_one_document_fingerprint():
+    fingerprints = {
+        fingerprint_payload(
+            {
+                **_payload(storage_reference=f"private://school/replay-{index}.pdf"),
+            }
+        )
+        for index in range(1000)
+    }
+
+    assert len(fingerprints) == 1
 
 
 def test_cross_tenant_duplicate_does_not_expose_original_submission(
@@ -272,6 +318,31 @@ def test_verification_report_records_signals_sla_and_does_not_publish(
     assert SchoolCurriculumAdoption.objects.count() == 0
 
 
+def test_expired_verification_sla_does_not_auto_approve_or_publish(
+    school,
+    school_admin_user,
+    principal_user,
+):
+    submission = submit_curriculum_evidence(
+        actor=principal_user,
+        tenant=school,
+        payload=_payload(storage_reference="private://school/expired-sla.pdf"),
+    )
+    submission.submitted_at = timezone.now() - timedelta(hours=25)
+    submission.save(update_fields=["submitted_at", "updated_at"])
+
+    report = create_curriculum_verification_report(
+        actor=school_admin_user,
+        tenant=school,
+        evidence_submission=submission,
+    )
+
+    assert report.sla_due_at < timezone.now()
+    assert CurriculumGovernanceDecision.objects.count() == 0
+    assert CurriculumPublication.objects.count() == 0
+    assert SchoolCurriculumAdoption.objects.count() == 0
+
+
 def test_governance_decision_requires_admin_and_does_not_globally_adopt(
     curriculum_version,
     principal_user,
@@ -322,6 +393,18 @@ def test_governance_decision_requires_admin_and_does_not_globally_adopt(
             publication_notes="Principal attempts direct curriculum publication.",
             workflow_approved=True,
         )
+    with pytest.raises(ValidationError):
+        record_governance_decision(
+            actor=school_admin_user,
+            tenant=school,
+            verification_report=report,
+            decision=(
+                CurriculumGovernanceDecision.Decision.APPROVED_FOR_PUBLICATION
+            ),
+            reason="Pending scan must block production approval.",
+        )
+
+    _mark_evidence_upload_ready(submission)
 
     decision = record_governance_decision(
         actor=school_admin_user,
@@ -336,6 +419,100 @@ def test_governance_decision_requires_admin_and_does_not_globally_adopt(
     assert list(get_curriculum_governance_decisions(tenant=school)) == [decision]
     assert CurriculumPublication.objects.count() == 0
     assert SchoolCurriculumAdoption.objects.count() == 0
+
+
+def test_cross_tenant_admin_cannot_create_verification_report(
+    principal_user,
+    school,
+):
+    other = _other_school()
+    other_admin = _role_user(other, Role.RoleCode.SCHOOL_ADMIN.value)
+    submission = submit_curriculum_evidence(
+        actor=principal_user,
+        tenant=school,
+        payload=_payload(storage_reference="private://school/cross-report.pdf"),
+    )
+
+    with pytest.raises(ValidationError):
+        create_curriculum_verification_report(
+            actor=other_admin,
+            tenant=school,
+            evidence_submission=submission,
+        )
+
+
+def test_malware_and_content_statuses_block_governance_approval(
+    principal_user,
+    school,
+    school_admin_user,
+):
+    _authority()
+    submission = submit_curriculum_evidence(
+        actor=principal_user,
+        tenant=school,
+        payload=_payload(storage_reference="private://school/scan-status.pdf"),
+    )
+    report = create_curriculum_verification_report(
+        actor=school_admin_user,
+        tenant=school,
+        evidence_submission=submission,
+        official_source_match_status=(
+            CurriculumVerificationReport.OfficialSourceMatch.MATCHED
+        ),
+        stamp_signal=True,
+        signature_signal=True,
+        template_signal=True,
+    )
+
+    with pytest.raises(ValidationError):
+        record_governance_decision(
+            actor=school_admin_user,
+            tenant=school,
+            verification_report=report,
+            decision=(
+                CurriculumGovernanceDecision.Decision.APPROVED_FOR_PUBLICATION
+            ),
+            reason="Pending scan must not approve.",
+        )
+
+    submission.malware_scan_status = (
+        CurriculumEvidenceSubmission.MalwareScanStatus.INFECTED
+    )
+    submission.content_verification_status = (
+        CurriculumEvidenceSubmission.ContentVerificationStatus.PASSED
+    )
+    submission.save(
+        update_fields=[
+            "malware_scan_status",
+            "content_verification_status",
+            "updated_at",
+        ]
+    )
+
+    with pytest.raises(ValidationError):
+        record_governance_decision(
+            actor=school_admin_user,
+            tenant=school,
+            verification_report=report,
+            decision=(
+                CurriculumGovernanceDecision.Decision.APPROVED_FOR_PUBLICATION
+            ),
+            reason="Infected evidence must not approve.",
+        )
+
+    _mark_evidence_upload_ready(submission)
+    decision = record_governance_decision(
+        actor=school_admin_user,
+        tenant=school,
+        verification_report=report,
+        decision=CurriculumGovernanceDecision.Decision.APPROVED_FOR_PUBLICATION,
+        reason="Clean and content-verified evidence may go to publication.",
+    )
+
+    assert (
+        decision.decision
+        == CurriculumGovernanceDecision.Decision.APPROVED_FOR_PUBLICATION
+    )
 
 
 def test_scope_app_impact_and_rollback_candidate_are_non_mutating(
@@ -415,6 +592,7 @@ def test_fullproof_events_are_versioned_reference_only_and_after_commit(
             signature_signal=True,
             template_signal=True,
         )
+        _mark_evidence_upload_ready(submission)
         decision = record_governance_decision(
             actor=school_admin_user,
             tenant=school,

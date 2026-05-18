@@ -64,6 +64,16 @@ content sniffing, extension allowlists, malware-scan-ready private storage, no
 public direct file URLs, no macro execution, no archive extraction, and audit
 logging of uploader, tenant, session/IP, and timestamp.
 
+Each evidence submission carries upload-readiness statuses. Malware scan status
+is `pending`, `clean`, `suspicious`, `infected`, or `unavailable`; content
+verification status is `pending`, `passed`, `failed`, or `unsupported`.
+Production scanners and content-sniffing workers will set those statuses from
+trusted infrastructure only. Client payloads cannot mark evidence clean or
+verified. Governance approval for publication requires `clean` malware status
+and `passed` content verification; pending, suspicious, infected, unavailable,
+failed, or unsupported evidence can remain under review but cannot advance to
+publication approval.
+
 Document verification reports record deterministic signals: reference number,
 publication number, dates, stamp/signature/template metadata, authority status,
 duplicate signal count, scope guess, risk flags, missing evidence, confidence
@@ -123,6 +133,23 @@ rate limiting, request size limits, queue back-pressure, and operational
 monitoring. The application layer only enforces bounded planning and scoped
 selectors; it must not synchronously process every school, learner, document
 page, or dependent app in one request.
+
+Evidence submission is a production step-up action. Before live binary uploads,
+the step-up confirmation must match the actor and tenant, must expire, and must
+not store raw passwords, PINs, or recovery secrets. Current backend tests cover
+metadata-only submission; production rollout must attach the real identity
+confirmation mechanism before exposing upload endpoints.
+
+Notice delivery remains a worker contract, not a request-path fan-out. Notice
+batches must be resumable and idempotent, worker retries must be bounded, and
+failed delivery must not roll back curriculum truth. Delivery facts and retry
+events must remain reference-only.
+
+Production monitoring must track evidence submissions per tenant, duplicate
+cluster growth, verification SLA breaches, pending governance decisions,
+rejected evidence, rollback candidates, withdrawn versions, pending or failed
+notice batches, event dispatch failures, rate-limit violations, malware scan
+failures, and content-verification failures.
 
 ## Senior School Intelligence
 

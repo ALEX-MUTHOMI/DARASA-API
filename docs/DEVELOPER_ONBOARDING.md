@@ -63,3 +63,12 @@ python -m compileall app
 CCT algorithms must remain deterministic and offline. Do not add live web calls,
 browser automation, AI parsing, automatic source polling, or automatic
 publication. Add source evidence and workflow tests for every hardening change.
+
+Evidence uploads are metadata-only backend contracts until production storage
+is attached. Principals and deputies submit quarantined evidence, not
+curriculum truth. Do not accept client-controlled scan status, content
+verification status, reviewer, publisher, publication, adoption, or rollback
+state. Governance approval requires a verification report plus clean malware
+status and passed content verification, and production upload endpoints must
+also enforce step-up confirmation, rate limits, private storage, and audit
+logging.

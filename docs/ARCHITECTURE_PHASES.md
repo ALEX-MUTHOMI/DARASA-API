@@ -85,6 +85,14 @@ publication workflow can proceed. Published still does not mean globally
 adopted, and rollout remains tenant-specific, scoped, batchable, and
 non-mutating for historical grading and compilation records.
 
+CCT production-readiness hardening keeps the upload path metadata-only while
+making the production contract explicit. Evidence carries malware-scan and
+content-verification readiness states, governance approval is blocked until
+trusted infrastructure marks evidence clean and content-verified, and step-up
+confirmation, rate limits, WAF/DDoS controls, private storage, worker retries,
+dead-letter handling, and operational monitoring remain production deployment
+requirements rather than hidden application shortcuts.
+
 ## Active Boundary Rules
 
 The default unit test command includes Phase 1 through Phase 6C work and
