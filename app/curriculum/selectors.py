@@ -9,19 +9,24 @@ from curriculum.algorithms.version_resolver import resolve_publication_for_date
 from curriculum.models import (
     AssessmentRubricFoundation,
     CoreCompetency,
+    CurriculumAppImpactPlan,
     CurriculumAuthority,
     CurriculumChangeSet,
     CurriculumDiff,
     CurriculumDiffItem,
+    CurriculumEvidenceSubmission,
+    CurriculumGovernanceDecision,
     CurriculumImpact,
     CurriculumLearningArea,
     CurriculumNoticeBatchRun,
     CurriculumPublication,
+    CurriculumRollbackCandidate,
     CurriculumRollbackPlan,
     CurriculumSourceDocument,
     CurriculumVersion,
     CurriculumVersionWithdrawal,
     CurriculumValue,
+    CurriculumVerificationReport,
     PertinentContemporaryIssue,
     PrincipalNotificationEvidenceCard,
     RegulatoryNotice,
@@ -263,6 +268,66 @@ def get_curriculum_notice_batch_runs(
     if tenant is not None:
         queryset = queryset.filter(tenant=tenant)
     return queryset.order_by("-created_at")
+
+
+def get_curriculum_evidence_submissions(
+    *,
+    tenant: School,
+) -> QuerySet[CurriculumEvidenceSubmission]:
+    return (
+        CurriculumEvidenceSubmission.objects.filter(tenant=tenant)
+        .select_related("tenant", "submitted_by", "duplicate_of")
+        .order_by("-submitted_at", "-created_at")
+    )
+
+
+def get_curriculum_verification_reports(
+    *,
+    tenant: School,
+) -> QuerySet[CurriculumVerificationReport]:
+    return (
+        CurriculumVerificationReport.objects.filter(tenant=tenant)
+        .select_related("tenant", "evidence_submission", "created_by")
+        .order_by("-created_at")
+    )
+
+
+def get_curriculum_governance_decisions(
+    *,
+    tenant: School,
+) -> QuerySet[CurriculumGovernanceDecision]:
+    return (
+        CurriculumGovernanceDecision.objects.filter(tenant=tenant)
+        .select_related("tenant", "verification_report", "reviewed_by")
+        .order_by("-reviewed_at", "-created_at")
+    )
+
+
+def get_curriculum_app_impact_plans(
+    *,
+    tenant: School,
+) -> QuerySet[CurriculumAppImpactPlan]:
+    return (
+        CurriculumAppImpactPlan.objects.filter(tenant=tenant)
+        .select_related("tenant", "verification_report")
+        .order_by("app_domain", "-created_at")
+    )
+
+
+def get_curriculum_rollback_candidates(
+    *,
+    tenant: School,
+) -> QuerySet[CurriculumRollbackCandidate]:
+    return (
+        CurriculumRollbackCandidate.objects.filter(tenant=tenant)
+        .select_related(
+            "tenant",
+            "evidence_submission",
+            "verification_report",
+            "created_by",
+        )
+        .order_by("-created_at")
+    )
 
 
 def get_curriculum_publication_history(

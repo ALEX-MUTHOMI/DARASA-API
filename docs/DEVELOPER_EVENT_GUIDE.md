@@ -72,6 +72,20 @@ Client-provided `event_payload`, HTML bodies, raw document bodies, uploaded
 file bytes, grade data, and learner or guardian data are rejected by the shared
 payload guard.
 
+CCT full-proofing adds `curriculum.evidence_submitted`,
+`curriculum.verification_report_created`,
+`curriculum.governance_decision_recorded`, and
+`curriculum.rollback_candidate_created`. These events are versioned facts with
+`event_version=1`; they are not commands to publish, adopt, roll out, or
+rollback curriculum. Payloads contain reference IDs, status, confidence level
+where applicable, and timestamps only.
+
+Evidence events must never include raw circular text, uploaded file bytes,
+HTML bodies, source document bodies, student or learner data, grade marks,
+component scores, report text, guardian contacts, teacher private notes, or
+NLP output. App impact planning remains stored as bounded review records rather
+than an event storm across schools, apps, learners, pages, or score cells.
+
 ## Ownership
 
 Changes under `app/events`, event docs, CI, Docker, settings, and scripts should

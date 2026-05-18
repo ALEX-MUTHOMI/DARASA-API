@@ -75,6 +75,16 @@ amplification simulations. The expected result is bounded, tenant-scoped,
 reference-only governance behavior; production traffic protection still
 requires infrastructure rate limits and monitoring.
 
+CCT Full-Proofing adds the operational evidence layer without turning uploads
+into curriculum truth. Principals, deputies, and school administrators submit
+quarantined evidence metadata and private storage references. CCT fingerprints
+and deduplicates evidence, records deterministic document verification reports,
+tracks the 24-hour review SLA, estimates scope conservatively, plans app impact,
+records rollback candidates, and requires governance approval before any
+publication workflow can proceed. Published still does not mean globally
+adopted, and rollout remains tenant-specific, scoped, batchable, and
+non-mutating for historical grading and compilation records.
+
 ## Active Boundary Rules
 
 The default unit test command includes Phase 1 through Phase 6C work and

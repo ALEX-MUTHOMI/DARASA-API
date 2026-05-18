@@ -49,12 +49,12 @@ def _other_school() -> School:
     )
 
 
-def _publish(curriculum_version, principal_user):
+def _publish(curriculum_version, school_admin_user):
     return create_curriculum_publication(
         curriculum_version=curriculum_version,
         effective_from=date(2026, 1, 1),
         publication_notes="Reviewed publication for red-team tests.",
-        approved_by=principal_user,
+        approved_by=school_admin_user,
         workflow_approved=True,
     )
 
@@ -72,11 +72,12 @@ def test_tenant_scoped_cct_selectors_do_not_leak_guessed_ids(
     curriculum_version,
     principal_role,
     principal_user,
+    school_admin_user,
     school,
 ):
     other = _other_school()
     other_principal = _principal_for(other, principal_role)
-    _publish(curriculum_version, principal_user)
+    _publish(curriculum_version, school_admin_user)
     other_adoption = schedule_school_curriculum_adoption(
         tenant=other,
         curriculum_version=curriculum_version,
@@ -106,6 +107,7 @@ def test_tenant_scoped_cct_selectors_do_not_leak_guessed_ids(
 def test_cross_tenant_principal_notice_acknowledgement_is_denied(
     principal_role,
     principal_user,
+    school_admin_user,
     school,
     source_document,
 ):
@@ -117,7 +119,7 @@ def test_cross_tenant_principal_notice_acknowledgement_is_denied(
         title="Senior School Implementation Update",
         summary="Senior School implementation update.",
         review_status="verified",
-        reviewed_by=principal_user,
+        reviewed_by=school_admin_user,
     )
     card = build_principal_notification_evidence_card(
         tenant=other,
@@ -143,11 +145,12 @@ def test_low_privilege_or_inactive_users_cannot_schedule_adoption_or_rollback(
     curriculum_version,
     principal_role,
     principal_user,
+    school_admin_user,
     school,
     teacher_role,
     teacher_user,
 ):
-    _publish(curriculum_version, principal_user)
+    _publish(curriculum_version, school_admin_user)
     teacher_context = PolicyContext(
         tenant=school,
         actor=teacher_user,
@@ -202,10 +205,11 @@ def test_low_privilege_or_inactive_users_cannot_schedule_adoption_or_rollback(
 def test_mass_assignment_and_state_machine_bypass_attempts_fail(
     curriculum_version,
     principal_user,
+    school_admin_user,
     school,
     source_document,
 ):
-    _publish(curriculum_version, principal_user)
+    _publish(curriculum_version, school_admin_user)
     adoption = schedule_school_curriculum_adoption(
         tenant=school,
         curriculum_version=curriculum_version,

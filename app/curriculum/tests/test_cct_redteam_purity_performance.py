@@ -19,14 +19,14 @@ pytestmark = [pytest.mark.django_db, pytest.mark.phase4]
 
 def test_notice_batch_creation_is_single_event_and_rolls_back_cleanly(
     django_capture_on_commit_callbacks,
-    principal_user,
+    school_admin_user,
 ):
     with django_capture_on_commit_callbacks(execute=True):
         batch = create_notice_batch_run(
             notice_type=CurriculumNoticeBatchRun.NoticeType.PRINCIPAL_EVIDENCE,
             total_count=10000,
             batch_size=500,
-            created_by=principal_user,
+            created_by=school_admin_user,
             notes="Batch planned for many schools.",
         )
 
@@ -41,7 +41,7 @@ def test_notice_batch_creation_is_single_event_and_rolls_back_cleanly(
                 notice_type=CurriculumNoticeBatchRun.NoticeType.TEACHER_READINESS,
                 total_count=10000,
                 batch_size=500,
-                created_by=principal_user,
+                created_by=school_admin_user,
                 notes="Rollback this batch.",
             )
             raise RuntimeError("force rollback")

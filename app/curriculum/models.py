@@ -37,6 +37,13 @@ def _require_text(value: str, field_name: str) -> None:
         raise ValidationError({field_name: _("This field is required.")})
 
 
+def _validate_optional_governance_text(value: str) -> str:
+    text = str(value or "").strip()
+    if text:
+        validate_governance_text(text)
+    return text
+
+
 class CurriculumSourceDocument(TimeStampedModel):
     class SourceAuthority(models.TextChoices):
         KICD = "kicd", _("Kenya Institute of Curriculum Development")
@@ -1275,6 +1282,481 @@ class CurriculumNoticeBatchRun(TimeStampedModel):
 
     def __str__(self) -> str:
         return f"CurriculumNoticeBatchRun {self.pk}"
+
+
+class CurriculumEvidenceSubmission(TimeStampedModel):
+    """Tenant-owned evidence metadata, not curriculum truth."""
+
+    class EvidenceType(models.TextChoices):
+        CURRICULUM_UPDATE = "curriculum_update", _("Curriculum update")
+        ROLLBACK = "rollback", _("Rollback")
+        WITHDRAWAL = "withdrawal", _("Withdrawal")
+
+    class Status(models.TextChoices):
+        RECEIVED = "received", _("Received")
+        QUARANTINED = "quarantined", _("Quarantined")
+        DUPLICATE_ATTACHED = "duplicate_attached", _("Duplicate attached")
+        UNDER_VERIFICATION = "under_verification", _("Under verification")
+        VERIFICATION_REPORTED = "verification_reported", _("Verification reported")
+        ESCALATED = "escalated", _("Escalated")
+        REJECTED = "rejected", _("Rejected")
+        GOVERNANCE_READY = "governance_ready", _("Governance ready")
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    tenant = models.ForeignKey(
+        School,
+        on_delete=models.CASCADE,
+        related_name="curriculum_evidence_submissions",
+    )
+    submitted_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="submitted_curriculum_evidence",
+    )
+    submitter_role = models.CharField(max_length=64)
+    evidence_type = models.CharField(
+        max_length=32,
+        choices=EvidenceType.choices,
+        default=EvidenceType.CURRICULUM_UPDATE,
+    )
+    status = models.CharField(
+        max_length=32,
+        choices=Status.choices,
+        default=Status.QUARANTINED,
+        db_index=True,
+    )
+    storage_reference = models.CharField(max_length=500)
+    file_name = models.CharField(max_length=255)
+    content_type = models.CharField(max_length=128)
+    size_bytes = models.PositiveIntegerField()
+    file_checksum = models.CharField(max_length=96)
+    evidence_fingerprint = models.CharField(max_length=96, db_index=True)
+    duplicate_cluster_id = models.UUIDField(default=uuid.uuid4, db_index=True)
+    duplicate_of = models.ForeignKey(
+        "self",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="duplicate_submissions",
+    )
+    claimed_authority = models.CharField(max_length=128, blank=True)
+    claimed_source_reference = models.CharField(max_length=255, blank=True)
+    claimed_source_url = models.URLField(max_length=500, blank=True)
+    claimed_reference_number = models.CharField(max_length=128, blank=True)
+    claimed_publication_number = models.CharField(max_length=128, blank=True)
+    claimed_publication_date = models.DateField(null=True, blank=True)
+    claimed_effective_date = models.DateField(null=True, blank=True)
+    claimed_scope = models.JSONField(default=dict, blank=True)
+    submitted_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta(TimeStampedModel.Meta):
+        verbose_name = _("Curriculum evidence submission")
+        verbose_name_plural = _("Curriculum evidence submissions")
+        indexes = [
+            models.Index(
+                fields=["tenant", "status", "created_at"],
+                name="curr_evid_tenant_status_idx",
+            ),
+            models.Index(
+                fields=["evidence_fingerprint", "status"],
+                name="curr_evid_fingerprint_idx",
+            ),
+            models.Index(
+                fields=["duplicate_cluster_id", "created_at"],
+                name="curr_evid_cluster_idx",
+            ),
+        ]
+
+    def clean(self) -> None:
+        super().clean()
+        self.submitter_role = _validate_optional_governance_text(
+            self.submitter_role
+        )
+        self.file_name = _validate_optional_governance_text(self.file_name)
+        self.claimed_authority = _validate_optional_governance_text(
+            self.claimed_authority
+        )
+        self.claimed_source_reference = _validate_optional_governance_text(
+            self.claimed_source_reference
+        )
+        self.claimed_reference_number = _validate_optional_governance_text(
+            self.claimed_reference_number
+        )
+        self.claimed_publication_number = _validate_optional_governance_text(
+            self.claimed_publication_number
+        )
+        if self.duplicate_of_id and self.duplicate_of_id == self.id:
+            raise ValidationError(
+                {"duplicate_of": _("Duplicate cannot reference self.")}
+            )
+        if self.duplicate_of_id and self.tenant_id:
+            if self.duplicate_of.tenant_id != self.tenant_id:
+                raise ValidationError(
+                    {"duplicate_of": _("Duplicate tenant mismatch.")}
+                )
+        if self.submitted_by_id and not self.submitted_by.is_active:
+            raise ValidationError({"submitted_by": _("Submitter must be active.")})
+        if self.duplicate_of_id:
+            self.duplicate_cluster_id = self.duplicate_of.duplicate_cluster_id
+
+    def save(self, *args: Any, **kwargs: Any) -> Any:
+        self.full_clean()
+        return super().save(*args, **kwargs)
+
+    def __str__(self) -> str:
+        return f"CurriculumEvidenceSubmission {self.pk}"
+
+
+class CurriculumVerificationReport(TimeStampedModel):
+    class Status(models.TextChoices):
+        PENDING = "pending", _("Pending")
+        COMPLETE = "complete", _("Complete")
+        NEEDS_MORE_EVIDENCE = "needs_more_evidence", _("Needs more evidence")
+        AWAITING_OFFICIAL_CONFIRMATION = (
+            "awaiting_official_confirmation",
+            _("Awaiting official confirmation"),
+        )
+        REJECTED = "rejected", _("Rejected")
+        ESCALATED = "escalated", _("Escalated")
+
+    class ConfidenceLevel(models.TextChoices):
+        LOW = "low", _("Low")
+        MEDIUM = "medium", _("Medium")
+        HIGH = "high", _("High")
+        REJECTED = "rejected", _("Rejected")
+        NEEDS_GOVERNANCE_REVIEW = (
+            "needs_governance_review",
+            _("Needs governance review"),
+        )
+
+    class RecommendedAction(models.TextChoices):
+        KEEP_QUARANTINED = "keep_quarantined", _("Keep quarantined")
+        REQUEST_MORE_EVIDENCE = "request_more_evidence", _("Request more evidence")
+        AWAIT_OFFICIAL_CONFIRMATION = (
+            "await_official_confirmation",
+            _("Await official confirmation"),
+        )
+        ESCALATE_TO_GOVERNANCE = (
+            "escalate_to_governance",
+            _("Escalate to governance"),
+        )
+        READY_FOR_GOVERNANCE_REVIEW = (
+            "ready_for_governance_review",
+            _("Ready for governance review"),
+        )
+        REJECT = "reject", _("Reject")
+
+    class OfficialSourceMatch(models.TextChoices):
+        UNKNOWN = "unknown", _("Unknown")
+        MATCHED = "matched", _("Matched")
+        UNMATCHED = "unmatched", _("Unmatched")
+        AWAITING_CONFIRMATION = (
+            "awaiting_confirmation",
+            _("Awaiting confirmation"),
+        )
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    tenant = models.ForeignKey(
+        School,
+        on_delete=models.CASCADE,
+        related_name="curriculum_verification_reports",
+    )
+    evidence_submission = models.OneToOneField(
+        CurriculumEvidenceSubmission,
+        on_delete=models.PROTECT,
+        related_name="verification_report",
+    )
+    candidate_id = models.UUIDField(db_index=True)
+    fingerprint = models.CharField(max_length=96)
+    source_classification = models.CharField(max_length=64, default="school_evidence")
+    claimed_authority = models.CharField(max_length=128, blank=True)
+    claimed_source_reference = models.CharField(max_length=255, blank=True)
+    reference_number_detected = models.BooleanField(default=False)
+    reference_number_value = models.CharField(max_length=128, blank=True)
+    publication_number_detected = models.BooleanField(default=False)
+    publication_number_value = models.CharField(max_length=128, blank=True)
+    publication_date_detected = models.BooleanField(default=False)
+    effective_date_detected = models.BooleanField(default=False)
+    stamp_signal = models.BooleanField(default=False)
+    signature_signal = models.BooleanField(default=False)
+    template_signal = models.BooleanField(default=False)
+    duplicate_signal_count = models.PositiveIntegerField(default=0)
+    official_source_match_status = models.CharField(
+        max_length=32,
+        choices=OfficialSourceMatch.choices,
+        default=OfficialSourceMatch.UNKNOWN,
+    )
+    scope_guess = models.JSONField(default=dict, blank=True)
+    confidence_score = models.PositiveSmallIntegerField(default=0)
+    confidence_level = models.CharField(
+        max_length=32,
+        choices=ConfidenceLevel.choices,
+        default=ConfidenceLevel.LOW,
+    )
+    risk_flags = models.JSONField(default=list, blank=True)
+    missing_evidence = models.JSONField(default=list, blank=True)
+    recommended_next_action = models.CharField(
+        max_length=48,
+        choices=RecommendedAction.choices,
+        default=RecommendedAction.KEEP_QUARANTINED,
+    )
+    sla_due_at = models.DateTimeField(db_index=True)
+    review_status = models.CharField(
+        max_length=48,
+        choices=Status.choices,
+        default=Status.PENDING,
+        db_index=True,
+    )
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="created_curriculum_verification_reports",
+    )
+
+    class Meta(TimeStampedModel.Meta):
+        verbose_name = _("Curriculum verification report")
+        verbose_name_plural = _("Curriculum verification reports")
+        indexes = [
+            models.Index(
+                fields=["tenant", "review_status", "sla_due_at"],
+                name="curr_verify_tenant_status_idx",
+            ),
+            models.Index(
+                fields=["candidate_id", "confidence_level"],
+                name="curr_verify_candidate_idx",
+            ),
+        ]
+
+    def clean(self) -> None:
+        super().clean()
+        if self.evidence_submission_id and self.tenant_id:
+            if self.evidence_submission.tenant_id != self.tenant_id:
+                raise ValidationError(
+                    {"tenant": _("Verification report tenant mismatch.")}
+                )
+        for value in [
+            self.claimed_authority,
+            self.claimed_source_reference,
+            self.reference_number_value,
+            self.publication_number_value,
+        ]:
+            _validate_optional_governance_text(value)
+        if self.confidence_score > 100:
+            raise ValidationError({"confidence_score": _("Confidence exceeds 100.")})
+
+    def save(self, *args: Any, **kwargs: Any) -> Any:
+        self.full_clean()
+        return super().save(*args, **kwargs)
+
+    def __str__(self) -> str:
+        return f"CurriculumVerificationReport {self.pk}"
+
+
+class CurriculumGovernanceDecision(TimeStampedModel):
+    class Decision(models.TextChoices):
+        PENDING = "pending", _("Pending")
+        APPROVED_FOR_PUBLICATION = (
+            "approved_for_publication",
+            _("Approved for publication"),
+        )
+        REJECTED = "rejected", _("Rejected")
+        REQUIRES_MORE_EVIDENCE = (
+            "requires_more_evidence",
+            _("Requires more evidence"),
+        )
+        ESCALATED = "escalated", _("Escalated")
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    tenant = models.ForeignKey(
+        School,
+        on_delete=models.CASCADE,
+        related_name="curriculum_governance_decisions",
+    )
+    verification_report = models.ForeignKey(
+        CurriculumVerificationReport,
+        on_delete=models.PROTECT,
+        related_name="governance_decisions",
+    )
+    decision = models.CharField(
+        max_length=48,
+        choices=Decision.choices,
+        default=Decision.PENDING,
+        db_index=True,
+    )
+    reason = models.TextField(blank=True)
+    reviewed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="curriculum_governance_decisions",
+    )
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta(TimeStampedModel.Meta):
+        verbose_name = _("Curriculum governance decision")
+        verbose_name_plural = _("Curriculum governance decisions")
+        indexes = [
+            models.Index(
+                fields=["tenant", "decision", "reviewed_at"],
+                name="curr_gov_tenant_decision_idx",
+            ),
+        ]
+
+    def clean(self) -> None:
+        super().clean()
+        if self.verification_report_id and self.tenant_id:
+            if self.verification_report.tenant_id != self.tenant_id:
+                raise ValidationError({"tenant": _("Governance tenant mismatch.")})
+        if self.reason:
+            self.reason = _validate_optional_governance_text(self.reason)
+        if self.reviewed_by_id and not self.reviewed_by.is_active:
+            raise ValidationError({"reviewed_by": _("Reviewer must be active.")})
+
+    def save(self, *args: Any, **kwargs: Any) -> Any:
+        self.full_clean()
+        return super().save(*args, **kwargs)
+
+    def __str__(self) -> str:
+        return f"CurriculumGovernanceDecision {self.pk}"
+
+
+class CurriculumAppImpactPlan(TimeStampedModel):
+    class Status(models.TextChoices):
+        PLANNED = "planned", _("Planned")
+        REVIEW_REQUIRED = "review_required", _("Review required")
+        APPROVED = "approved", _("Approved")
+        PAUSED = "paused", _("Paused")
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    tenant = models.ForeignKey(
+        School,
+        on_delete=models.CASCADE,
+        related_name="curriculum_app_impact_plans",
+    )
+    verification_report = models.ForeignKey(
+        CurriculumVerificationReport,
+        on_delete=models.PROTECT,
+        related_name="app_impact_plans",
+    )
+    app_domain = models.CharField(max_length=64, db_index=True)
+    impact_type = models.CharField(max_length=64)
+    affected_scope = models.JSONField(default=dict, blank=True)
+    required_action = models.TextField()
+    safe_behavior = models.TextField()
+    historical_protection_rule = models.TextField()
+    status = models.CharField(
+        max_length=32,
+        choices=Status.choices,
+        default=Status.PLANNED,
+        db_index=True,
+    )
+
+    class Meta(TimeStampedModel.Meta):
+        verbose_name = _("Curriculum app impact plan")
+        verbose_name_plural = _("Curriculum app impact plans")
+        indexes = [
+            models.Index(
+                fields=["tenant", "app_domain", "status"],
+                name="curr_app_impact_tenant_idx",
+            ),
+        ]
+
+    def clean(self) -> None:
+        super().clean()
+        if self.verification_report_id and self.tenant_id:
+            if self.verification_report.tenant_id != self.tenant_id:
+                raise ValidationError({"tenant": _("Impact plan tenant mismatch.")})
+        self.app_domain = _validate_optional_governance_text(self.app_domain)
+        self.impact_type = _validate_optional_governance_text(self.impact_type)
+        validate_governance_text(self.required_action)
+        validate_governance_text(self.safe_behavior)
+        validate_governance_text(self.historical_protection_rule)
+
+    def save(self, *args: Any, **kwargs: Any) -> Any:
+        self.full_clean()
+        return super().save(*args, **kwargs)
+
+    def __str__(self) -> str:
+        return f"CurriculumAppImpactPlan {self.pk}"
+
+
+class CurriculumRollbackCandidate(TimeStampedModel):
+    class Status(models.TextChoices):
+        SUSPECTED = "suspected", _("Suspected")
+        QUARANTINED = "quarantined", _("Quarantined")
+        UNDER_REVIEW = "under_review", _("Under review")
+        VERIFIED = "verified", _("Verified")
+        REJECTED = "rejected", _("Rejected")
+        ROLLBACK_PLANNED = "rollback_planned", _("Rollback planned")
+        WITHDRAWN = "withdrawn", _("Withdrawn")
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    tenant = models.ForeignKey(
+        School,
+        on_delete=models.CASCADE,
+        related_name="curriculum_rollback_candidates",
+    )
+    evidence_submission = models.ForeignKey(
+        CurriculumEvidenceSubmission,
+        on_delete=models.PROTECT,
+        related_name="rollback_candidates",
+    )
+    verification_report = models.ForeignKey(
+        CurriculumVerificationReport,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="rollback_candidates",
+    )
+    status = models.CharField(
+        max_length=32,
+        choices=Status.choices,
+        default=Status.QUARANTINED,
+        db_index=True,
+    )
+    reason = models.TextField()
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="created_curriculum_rollback_candidates",
+    )
+
+    class Meta(TimeStampedModel.Meta):
+        verbose_name = _("Curriculum rollback candidate")
+        verbose_name_plural = _("Curriculum rollback candidates")
+        indexes = [
+            models.Index(
+                fields=["tenant", "status", "created_at"],
+                name="curr_rb_candidate_tenant_idx",
+            ),
+        ]
+
+    def clean(self) -> None:
+        super().clean()
+        if self.evidence_submission_id and self.tenant_id:
+            if self.evidence_submission.tenant_id != self.tenant_id:
+                raise ValidationError({"tenant": _("Rollback tenant mismatch.")})
+        if self.verification_report_id and self.tenant_id:
+            if self.verification_report.tenant_id != self.tenant_id:
+                raise ValidationError({"tenant": _("Rollback report mismatch.")})
+        validate_governance_text(self.reason)
+        self.reason = self.reason.strip()
+        if self.created_by_id and not self.created_by.is_active:
+            raise ValidationError({"created_by": _("Creator must be active.")})
+
+    def save(self, *args: Any, **kwargs: Any) -> Any:
+        self.full_clean()
+        return super().save(*args, **kwargs)
+
+    def __str__(self) -> str:
+        return f"CurriculumRollbackCandidate {self.pk}"
 
 
 class CurriculumDiff(TimeStampedModel):

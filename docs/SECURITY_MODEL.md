@@ -38,6 +38,24 @@ principal evidence cards, teacher readiness notices, adoption records,
 withdrawal records, rollback plans, and notice batch runs; it must not fan out
 unbounded synchronous work to all schools or all learners.
 
+CCT full-proofing adds a school evidence-intake workflow. Principals, deputies,
+and school administrators may submit private storage references and document
+metadata, but that creates quarantined evidence only. It never publishes a
+curriculum version, adopts a version for a tenant, changes grading, changes
+compiled snapshots, generates reports, or notifies every school as truth.
+
+Document verification reports score deterministic signals such as reference
+numbers, publication numbers, dates, stamp/signature metadata, duplicate
+clusters, authority match status, and claimed scope. These signals support
+review; they are not proof. A 24-hour SLA is a review target, not an
+auto-approval timer.
+
+Governance decisions are separate and server-derived. Current approval requires
+the school-admin governance role until dedicated curriculum governance roles
+exist. Principals and deputies can submit evidence, but they cannot approve
+curriculum truth through the full-proofing workflow; `is_staff` alone remains
+irrelevant to curriculum authority.
+
 ## Secrets and PII
 
 Production secrets must come from environment variables. Fernet configuration is

@@ -60,13 +60,13 @@ def test_source_and_version_metadata_rejects_executable_html(
 def test_notices_and_withdrawals_reject_executable_html(
     payload,
     curriculum_version,
-    principal_user,
+    school_admin_user,
     school,
 ):
     with pytest.raises(ValidationError):
         mark_curriculum_version_withdrawn(
             curriculum_version=curriculum_version,
-            withdrawn_by=principal_user,
+            withdrawn_by=school_admin_user,
             reason=payload,
         )
 
@@ -75,14 +75,14 @@ def test_notices_and_withdrawals_reject_executable_html(
             notice_type=CurriculumNoticeBatchRun.NoticeType.PRINCIPAL_EVIDENCE,
             total_count=1,
             batch_size=1,
-            created_by=principal_user,
+            created_by=school_admin_user,
             tenant=school,
             notes=payload,
         )
 
 
 def test_principal_notice_rejects_html_and_does_not_emit_raw_text(
-    principal_user,
+    school_admin_user,
     school,
     source_document,
 ):
@@ -92,7 +92,7 @@ def test_principal_notice_rejects_html_and_does_not_emit_raw_text(
         title="Senior School Update",
         summary="Senior School curriculum implementation guidance.",
         review_status=RegulatoryNotice.ReviewStatus.VERIFIED,
-        reviewed_by=principal_user,
+        reviewed_by=school_admin_user,
     )
     with pytest.raises(ValidationError):
         build_principal_notification_evidence_card(

@@ -10,6 +10,7 @@ preserves the audit trail a school principal needs.
 from __future__ import annotations
 
 from typing import Any
+from uuid import uuid4
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
@@ -23,12 +24,21 @@ from curriculum.algorithms.dependency_guards import (
     validate_historical_dependency_state,
     validate_reporting_dependency_state,
 )
+from curriculum.algorithms.app_impact_planner import plan_app_impacts
 from curriculum.algorithms.curriculum_impact_analyzer import analyze_diff_item_impact
 from curriculum.algorithms.authority_normalizer import normalize_authority_code
 from curriculum.algorithms.checksum import compute_sha256
+from curriculum.algorithms.document_signal_validator import validate_document_signals
+from curriculum.algorithms.evidence_fingerprint import fingerprint_payload
+from curriculum.algorithms.governance_decision_rules import (
+    validate_governance_decision,
+)
 from curriculum.algorithms.notice_batch_planning import plan_notice_batch
 from curriculum.algorithms.principal_notification_builder import (
     build_notification_payload,
+)
+from curriculum.algorithms.rollback_candidate_rules import (
+    validate_rollback_candidate_status,
 )
 from curriculum.algorithms.publication_state_machine import validate_transition
 from curriculum.algorithms.regulatory_notice_classifier import (
@@ -37,28 +47,41 @@ from curriculum.algorithms.regulatory_notice_classifier import (
 from curriculum.algorithms.senior_school_dependency_mapper import (
     map_junior_to_senior_signals,
 )
+from curriculum.algorithms.scope_estimator import estimate_scope
 from curriculum.algorithms.rollout_planning import validate_adoption_window
 from curriculum.algorithms.teacher_readiness_mapper import (
     map_teacher_readiness_requirement as map_teacher_requirement_algorithm,
 )
+from curriculum.algorithms.upload_metadata_guard import validate_upload_metadata
+from curriculum.algorithms.verification_confidence_scorer import (
+    score_verification_confidence,
+)
+from curriculum.algorithms.verification_sla_calculator import (
+    calculate_verification_sla_due_at,
+)
 from curriculum.models import (
     AssessmentRubricFoundation,
     CoreCompetency,
+    CurriculumAppImpactPlan,
     CurriculumAuthority,
     CurriculumChangeSet,
     CurriculumDiff,
     CurriculumDiffItem,
+    CurriculumEvidenceSubmission,
+    CurriculumGovernanceDecision,
     CurriculumGradeMapping,
     CurriculumImpact,
     CurriculumLearningArea,
     CurriculumNoticeBatchRun,
     CurriculumPublication,
+    CurriculumRollbackCandidate,
     CurriculumRollbackPlan,
     CurriculumSourceDocument,
     CurriculumStage,
     CurriculumValue,
     CurriculumVersion,
     CurriculumVersionWithdrawal,
+    CurriculumVerificationReport,
     OutcomeCompetencyLink,
     OutcomePCILink,
     OutcomeValueLink,
@@ -95,7 +118,6 @@ def _require_curriculum_truth_manager(
 ) -> None:
     _require_active_reviewer(user)
     allowed = {
-        Role.RoleCode.PRINCIPAL.value,
         Role.RoleCode.SCHOOL_ADMIN.value,
     }
     if not TenantUserRole.objects.filter(
@@ -111,6 +133,7 @@ def _require_school_curriculum_manager(user: Any, tenant: Any) -> None:
     _require_active_reviewer(user)
     allowed = {
         Role.RoleCode.PRINCIPAL.value,
+        Role.RoleCode.DEPUTY_PRINCIPAL.value,
         Role.RoleCode.SCHOOL_ADMIN.value,
     }
     if not any(
@@ -118,6 +141,29 @@ def _require_school_curriculum_manager(user: Any, tenant: Any) -> None:
         for role_code in allowed
     ):
         raise ValidationError({"actor": "Curriculum school authority is required."})
+
+
+def _require_evidence_submitter(user: Any, tenant: Any) -> str:
+    _require_active_reviewer(user)
+    allowed = (
+        Role.RoleCode.PRINCIPAL.value,
+        Role.RoleCode.DEPUTY_PRINCIPAL.value,
+        Role.RoleCode.SCHOOL_ADMIN.value,
+    )
+    for role_code in allowed:
+        if user_has_role_in_tenant(user=user, tenant=tenant, role_code=role_code):
+            return role_code
+    raise ValidationError({"actor": "Evidence submitter role is required."})
+
+
+def _require_governance_approver(user: Any, tenant: Any) -> None:
+    _require_active_reviewer(user)
+    if not user_has_role_in_tenant(
+        user=user,
+        tenant=tenant,
+        role_code=Role.RoleCode.SCHOOL_ADMIN.value,
+    ):
+        raise ValidationError({"actor": "Curriculum governance role is required."})
 
 
 def _record_curriculum_event_after_commit(
@@ -601,6 +647,363 @@ def create_notice_batch_run(
         payload=payload,
     )
     return batch
+
+
+def _validate_claimed_source_url(
+    *,
+    claimed_authority: str,
+    claimed_source_url: str,
+) -> str:
+    url = str(claimed_source_url or "").strip()
+    if not url:
+        return ""
+    authority_code = normalize_authority_code(claimed_authority)
+    authority = CurriculumAuthority.objects.filter(
+        code=authority_code,
+        is_active=True,
+        is_approved=True,
+    ).first()
+    if authority is None:
+        raise ValidationError({"claimed_source_url": "Approved authority required."})
+    from curriculum.algorithms.source_url_validator import validate_source_url
+
+    return validate_source_url(url, allowed_domains=authority.allowed_domains)
+
+
+@transaction.atomic
+def submit_curriculum_evidence(
+    *,
+    actor: Any,
+    tenant: Any,
+    payload: dict[str, Any],
+) -> CurriculumEvidenceSubmission:
+    role_code = _require_evidence_submitter(actor, tenant)
+    metadata = validate_upload_metadata(
+        storage_reference=str(payload.get("storage_reference", "")),
+        file_name=str(payload.get("filename", payload.get("file_name", ""))),
+        content_type=str(payload.get("content_type", "")),
+        size_bytes=int(payload.get("size_bytes", payload.get("file_size", 0))),
+        file_checksum=str(payload.get("file_checksum", "")),
+    )
+    claimed_scope = estimate_scope(payload.get("claimed_scope") or None)
+    claimed_authority = str(payload.get("claimed_authority", "")).strip()
+    claimed_source_url = _validate_claimed_source_url(
+        claimed_authority=claimed_authority,
+        claimed_source_url=str(payload.get("claimed_source_url", "")),
+    )
+    if CurriculumEvidenceSubmission.objects.filter(
+        storage_reference=metadata.storage_reference,
+    ).exclude(tenant=tenant).exists():
+        raise ValidationError(
+            {"storage_reference": "Storage reference belongs to another tenant."}
+        )
+
+    fingerprint = fingerprint_payload(
+        {
+            **payload,
+            "file_checksum": metadata.file_checksum,
+            "storage_reference": metadata.storage_reference,
+            "claimed_authority": claimed_authority,
+        }
+    )
+    original = (
+        CurriculumEvidenceSubmission.objects.filter(
+            evidence_fingerprint=fingerprint,
+        )
+        .order_by("created_at")
+        .first()
+    )
+    status = CurriculumEvidenceSubmission.Status.QUARANTINED
+    duplicate_of = None
+    duplicate_cluster_id = uuid4()
+    if original is not None:
+        status = CurriculumEvidenceSubmission.Status.DUPLICATE_ATTACHED
+        duplicate_cluster_id = original.duplicate_cluster_id
+        if original.tenant_id == tenant.id:
+            duplicate_of = original
+
+    submission = _save_clean(
+        CurriculumEvidenceSubmission(
+            tenant=tenant,
+            submitted_by=actor,
+            submitter_role=role_code,
+            evidence_type=payload.get(
+                "evidence_type",
+                CurriculumEvidenceSubmission.EvidenceType.CURRICULUM_UPDATE,
+            ),
+            status=status,
+            storage_reference=metadata.storage_reference,
+            file_name=metadata.file_name,
+            content_type=metadata.content_type,
+            size_bytes=metadata.size_bytes,
+            file_checksum=metadata.file_checksum,
+            evidence_fingerprint=fingerprint,
+            duplicate_of=duplicate_of,
+            duplicate_cluster_id=duplicate_cluster_id,
+            claimed_authority=claimed_authority,
+            claimed_source_reference=str(
+                payload.get("claimed_source_reference", "")
+            ).strip(),
+            claimed_source_url=claimed_source_url,
+            claimed_reference_number=str(
+                payload.get("claimed_reference_number", "")
+            ).strip(),
+            claimed_publication_number=str(
+                payload.get("claimed_publication_number", "")
+            ).strip(),
+            claimed_publication_date=payload.get("claimed_publication_date"),
+            claimed_effective_date=payload.get("claimed_effective_date"),
+            claimed_scope=claimed_scope,
+        )
+    )
+    _record_curriculum_event_after_commit(
+        event_type="curriculum.evidence_submitted",
+        tenant=tenant,
+        actor_id=actor.id,
+        idempotency_key=f"curriculum-evidence-submitted:{submission.id}",
+        payload={
+            "tenant_id": str(tenant.id),
+            "evidence_submission_id": str(submission.id),
+            "status": submission.status,
+            "created_at": submission.created_at.isoformat(),
+        },
+    )
+    return submission
+
+
+@transaction.atomic
+def create_curriculum_verification_report(
+    *,
+    actor: Any,
+    tenant: Any,
+    evidence_submission: CurriculumEvidenceSubmission,
+    official_source_match_status: str = (
+        CurriculumVerificationReport.OfficialSourceMatch.UNKNOWN
+    ),
+    stamp_signal: bool = False,
+    signature_signal: bool = False,
+    template_signal: bool = False,
+) -> CurriculumVerificationReport:
+    _require_curriculum_truth_manager(actor)
+    if evidence_submission.tenant_id != tenant.id:
+        raise ValidationError({"tenant": "Evidence tenant is invalid."})
+    signals = validate_document_signals(
+        claimed_reference_number=evidence_submission.claimed_reference_number,
+        claimed_publication_number=evidence_submission.claimed_publication_number,
+        claimed_publication_date=evidence_submission.claimed_publication_date,
+        claimed_effective_date=evidence_submission.claimed_effective_date,
+        stamp_signal=stamp_signal,
+        signature_signal=signature_signal,
+        template_signal=template_signal,
+    )
+    authority_known = CurriculumAuthority.objects.filter(
+        code=normalize_authority_code(evidence_submission.claimed_authority),
+        is_active=True,
+        is_approved=True,
+    ).exists()
+    duplicate_count = CurriculumEvidenceSubmission.objects.filter(
+        duplicate_cluster_id=evidence_submission.duplicate_cluster_id,
+    ).exclude(id=evidence_submission.id).count()
+    confidence = score_verification_confidence(
+        signals=signals,
+        authority_known=authority_known,
+        official_source_match_status=official_source_match_status,
+        duplicate_signal_count=duplicate_count,
+    )
+    status_by_action = {
+        "reject": CurriculumVerificationReport.Status.REJECTED,
+        "request_more_evidence": (
+            CurriculumVerificationReport.Status.NEEDS_MORE_EVIDENCE
+        ),
+        "await_official_confirmation": (
+            CurriculumVerificationReport.Status.AWAITING_OFFICIAL_CONFIRMATION
+        ),
+        "escalate_to_governance": CurriculumVerificationReport.Status.ESCALATED,
+        "ready_for_governance_review": CurriculumVerificationReport.Status.COMPLETE,
+    }
+    report = _save_clean(
+        CurriculumVerificationReport(
+            tenant=tenant,
+            evidence_submission=evidence_submission,
+            candidate_id=evidence_submission.duplicate_cluster_id,
+            fingerprint=evidence_submission.evidence_fingerprint,
+            claimed_authority=evidence_submission.claimed_authority,
+            claimed_source_reference=evidence_submission.claimed_source_reference,
+            reference_number_detected=signals.reference_number_detected,
+            reference_number_value=evidence_submission.claimed_reference_number,
+            publication_number_detected=signals.publication_number_detected,
+            publication_number_value=evidence_submission.claimed_publication_number,
+            publication_date_detected=signals.publication_date_detected,
+            effective_date_detected=signals.effective_date_detected,
+            stamp_signal=signals.stamp_signal,
+            signature_signal=signals.signature_signal,
+            template_signal=signals.template_signal,
+            duplicate_signal_count=duplicate_count,
+            official_source_match_status=official_source_match_status,
+            scope_guess=evidence_submission.claimed_scope,
+            confidence_score=confidence.score,
+            confidence_level=confidence.level,
+            risk_flags=list(signals.risk_flags),
+            missing_evidence=list(signals.missing_evidence),
+            recommended_next_action=confidence.recommended_next_action,
+            sla_due_at=calculate_verification_sla_due_at(
+                submitted_at=evidence_submission.submitted_at
+            ),
+            review_status=status_by_action.get(
+                confidence.recommended_next_action,
+                CurriculumVerificationReport.Status.PENDING,
+            ),
+            created_by=actor,
+        )
+    )
+    if report.review_status == CurriculumVerificationReport.Status.COMPLETE:
+        evidence_submission.status = (
+            CurriculumEvidenceSubmission.Status.GOVERNANCE_READY
+        )
+    elif report.review_status == CurriculumVerificationReport.Status.ESCALATED:
+        evidence_submission.status = CurriculumEvidenceSubmission.Status.ESCALATED
+    elif report.review_status == CurriculumVerificationReport.Status.REJECTED:
+        evidence_submission.status = CurriculumEvidenceSubmission.Status.REJECTED
+    else:
+        evidence_submission.status = (
+            CurriculumEvidenceSubmission.Status.VERIFICATION_REPORTED
+        )
+    _save_clean(evidence_submission)
+    _record_curriculum_event_after_commit(
+        event_type="curriculum.verification_report_created",
+        tenant=tenant,
+        actor_id=actor.id,
+        idempotency_key=f"curriculum-verification-report-created:{report.id}",
+        payload={
+            "tenant_id": str(tenant.id),
+            "evidence_submission_id": str(evidence_submission.id),
+            "verification_report_id": str(report.id),
+            "confidence_level": report.confidence_level,
+            "status": report.review_status,
+            "created_at": report.created_at.isoformat(),
+        },
+    )
+    return report
+
+
+@transaction.atomic
+def record_governance_decision(
+    *,
+    actor: Any,
+    tenant: Any,
+    verification_report: CurriculumVerificationReport,
+    decision: str,
+    reason: str = "",
+) -> CurriculumGovernanceDecision:
+    _require_governance_approver(actor, tenant)
+    if verification_report.tenant_id != tenant.id:
+        raise ValidationError({"tenant": "Verification report tenant is invalid."})
+    normalized_decision = validate_governance_decision(
+        decision=decision,
+        report_status=verification_report.review_status,
+        reason=reason,
+    )
+    governance_decision = _save_clean(
+        CurriculumGovernanceDecision(
+            tenant=tenant,
+            verification_report=verification_report,
+            decision=normalized_decision,
+            reason=reason,
+            reviewed_by=actor,
+            reviewed_at=timezone.now(),
+        )
+    )
+    _record_curriculum_event_after_commit(
+        event_type="curriculum.governance_decision_recorded",
+        tenant=tenant,
+        actor_id=actor.id,
+        idempotency_key=(
+            f"curriculum-governance-decision-recorded:{governance_decision.id}"
+        ),
+        payload={
+            "tenant_id": str(tenant.id),
+            "verification_report_id": str(verification_report.id),
+            "governance_decision_id": str(governance_decision.id),
+            "status": governance_decision.decision,
+            "created_at": governance_decision.created_at.isoformat(),
+        },
+    )
+    return governance_decision
+
+
+@transaction.atomic
+def plan_curriculum_app_impacts(
+    *,
+    actor: Any,
+    tenant: Any,
+    verification_report: CurriculumVerificationReport,
+    app_domains: list[str] | None = None,
+) -> list[CurriculumAppImpactPlan]:
+    _require_school_curriculum_manager(actor, tenant)
+    if verification_report.tenant_id != tenant.id:
+        raise ValidationError({"tenant": "Verification report tenant is invalid."})
+    plans = [
+        _save_clean(
+            CurriculumAppImpactPlan(
+                tenant=tenant,
+                verification_report=verification_report,
+                app_domain=proposal.app_domain,
+                impact_type=proposal.impact_type,
+                affected_scope=proposal.affected_scope,
+                required_action=proposal.required_action,
+                safe_behavior=proposal.safe_behavior,
+                historical_protection_rule=proposal.historical_protection_rule,
+                status=proposal.status,
+            )
+        )
+        for proposal in plan_app_impacts(
+            scope=verification_report.scope_guess,
+            app_domains=app_domains,
+        )
+    ]
+    return plans
+
+
+@transaction.atomic
+def create_curriculum_rollback_candidate(
+    *,
+    actor: Any,
+    tenant: Any,
+    evidence_submission: CurriculumEvidenceSubmission,
+    reason: str,
+    verification_report: CurriculumVerificationReport | None = None,
+    status: str = CurriculumRollbackCandidate.Status.QUARANTINED,
+) -> CurriculumRollbackCandidate:
+    _require_school_curriculum_manager(actor, tenant)
+    if evidence_submission.tenant_id != tenant.id:
+        raise ValidationError({"tenant": "Evidence tenant is invalid."})
+    if verification_report is not None and verification_report.tenant_id != tenant.id:
+        raise ValidationError({"tenant": "Verification report tenant is invalid."})
+    normalized_status = validate_rollback_candidate_status(status)
+    candidate = _save_clean(
+        CurriculumRollbackCandidate(
+            tenant=tenant,
+            evidence_submission=evidence_submission,
+            verification_report=verification_report,
+            reason=reason,
+            status=normalized_status,
+            created_by=actor,
+        )
+    )
+    _record_curriculum_event_after_commit(
+        event_type="curriculum.rollback_candidate_created",
+        tenant=tenant,
+        actor_id=actor.id,
+        idempotency_key=f"curriculum-rollback-candidate-created:{candidate.id}",
+        payload={
+            "tenant_id": str(tenant.id),
+            "rollback_candidate_id": str(candidate.id),
+            "evidence_submission_id": str(evidence_submission.id),
+            "status": candidate.status,
+            "created_at": candidate.created_at.isoformat(),
+        },
+    )
+    return candidate
 
 
 def validate_curriculum_context_for_grading_binding(

@@ -62,6 +62,14 @@ def teacher_role() -> Role:
 
 
 @pytest.fixture
+def school_admin_role() -> Role:
+    return Role.objects.create(
+        code=Role.RoleCode.SCHOOL_ADMIN,
+        name=Role.RoleCode.SCHOOL_ADMIN.label,
+    )
+
+
+@pytest.fixture
 def principal_user(school, principal_role) -> CustomUser:
     user = CustomUser.objects.create_user(
         email=f"curriculum-principal-{_token()}@example.test",
@@ -78,6 +86,16 @@ def teacher_user(school, teacher_role) -> CustomUser:
         password="test-only-secret",
     )
     TenantUserRole.objects.create(tenant=school, user=user, role=teacher_role)
+    return user
+
+
+@pytest.fixture
+def school_admin_user(school, school_admin_role) -> CustomUser:
+    user = CustomUser.objects.create_user(
+        email=f"curriculum-admin-{_token()}@example.test",
+        password="test-only-secret",
+    )
+    TenantUserRole.objects.create(tenant=school, user=user, role=school_admin_role)
     return user
 
 

@@ -266,7 +266,9 @@ def test_curriculum_diff_models_and_impact_analysis(
         )
 
 
-def test_regulatory_notice_classification_and_verification_workflow(principal_user):
+def test_regulatory_notice_classification_and_verification_workflow(
+    school_admin_user,
+):
     authority = _authority("kicd")
     source_document = _source_document(authority)
 
@@ -289,7 +291,7 @@ def test_regulatory_notice_classification_and_verification_workflow(principal_us
         title="Senior School Curriculum Design Update",
         summary="Grade 10 curriculum design implementation update.",
         review_status=RegulatoryNotice.ReviewStatus.VERIFIED,
-        reviewed_by=principal_user,
+        reviewed_by=school_admin_user,
     )
 
     assert notice.review_status == RegulatoryNotice.ReviewStatus.VERIFIED
@@ -308,7 +310,7 @@ def test_regulatory_notice_classification_and_verification_workflow(principal_us
     assert list(get_regulatory_notices_for_review()) == [classified]
 
 
-def test_unofficial_or_pii_notice_cannot_be_verified(principal_user):
+def test_unofficial_or_pii_notice_cannot_be_verified(school_admin_user):
     authority = register_curriculum_authority(
         code="moe",
         name="Ministry of Education",
@@ -323,7 +325,7 @@ def test_unofficial_or_pii_notice_cannot_be_verified(principal_user):
             title="Fake Senior School Circular",
             summary="Senior School update.",
             review_status=RegulatoryNotice.ReviewStatus.VERIFIED,
-            reviewed_by=principal_user,
+            reviewed_by=school_admin_user,
         )
 
     approved_authority = _authority("knec")
@@ -336,7 +338,7 @@ def test_unofficial_or_pii_notice_cannot_be_verified(principal_user):
 
 
 def test_regulatory_impact_and_teacher_readiness_mapping(
-    principal_user,
+    school_admin_user,
     learning_area,
     grade_level,
 ):
@@ -348,7 +350,7 @@ def test_regulatory_impact_and_teacher_readiness_mapping(
         title="TSC Grade 10 Teacher Training Notice",
         summary="Senior School assessment training required for Grade 10 teachers.",
         review_status=RegulatoryNotice.ReviewStatus.VERIFIED,
-        reviewed_by=principal_user,
+        reviewed_by=school_admin_user,
     )
     impact = create_regulatory_impact(
         regulatory_notice=notice,
@@ -382,6 +384,7 @@ def test_regulatory_impact_and_teacher_readiness_mapping(
 
 def test_principal_notification_evidence_acknowledgement_and_no_activation(
     principal_user,
+    school_admin_user,
     school,
 ):
     authority = _authority("moe")
@@ -392,7 +395,7 @@ def test_principal_notification_evidence_acknowledgement_and_no_activation(
         title="Senior School Regulatory Update",
         summary="Grade 10 Senior School pathway readiness update.",
         review_status=RegulatoryNotice.ReviewStatus.VERIFIED,
-        reviewed_by=principal_user,
+        reviewed_by=school_admin_user,
     )
     card = build_principal_notification_evidence_card(
         tenant=school,
@@ -432,7 +435,12 @@ def test_principal_notification_evidence_acknowledgement_and_no_activation(
         )
 
 
-def test_notification_security_abuse_cases(principal_user, teacher_user, school):
+def test_notification_security_abuse_cases(
+    principal_user,
+    school_admin_user,
+    teacher_user,
+    school,
+):
     authority = _authority("knec")
     source_document = _source_document(authority)
     notice = register_regulatory_notice(
@@ -441,7 +449,7 @@ def test_notification_security_abuse_cases(principal_user, teacher_user, school)
         title="KNEC Assessment Guidance",
         summary="Senior School assessment guidance update.",
         review_status=RegulatoryNotice.ReviewStatus.VERIFIED,
-        reviewed_by=principal_user,
+        reviewed_by=school_admin_user,
         status=PrincipalNotificationEvidenceCard.Status.ISSUED,
     )
 
@@ -481,31 +489,31 @@ def test_notification_security_abuse_cases(principal_user, teacher_user, school)
 
 
 def test_policies_fail_closed_and_inactive_role_binding_denies(
-    principal_user,
-    principal_role,
+    school_admin_user,
+    school_admin_role,
     school,
 ):
     context = PolicyContext(
         tenant=school,
-        actor=principal_user,
+        actor=school_admin_user,
         action="curriculum.regulatory.register",
-        role=principal_role,
+        role=school_admin_role,
     )
     assert can_register_regulatory_notice(context)
 
     TenantUserRole.objects.filter(
         tenant=school,
-        user=principal_user,
-        role=principal_role,
+        user=school_admin_user,
+        role=school_admin_role,
     ).update(is_active=False)
 
     assert not can_register_regulatory_notice(context)
     assert not can_issue_principal_notification(
         PolicyContext(
             tenant=school,
-            actor=principal_user,
+            actor=school_admin_user,
             action="curriculum.notification.issue",
-            role=principal_role,
+            role=school_admin_role,
         )
     )
 
@@ -513,6 +521,7 @@ def test_policies_fail_closed_and_inactive_role_binding_denies(
 def test_acknowledgement_policy_is_tenant_scoped(
     principal_user,
     principal_role,
+    school_admin_user,
     school,
 ):
     authority = _authority("moe")
@@ -523,7 +532,7 @@ def test_acknowledgement_policy_is_tenant_scoped(
         title="Senior School Implementation Circular",
         summary="Senior School implementation guidance.",
         review_status=RegulatoryNotice.ReviewStatus.VERIFIED,
-        reviewed_by=principal_user,
+        reviewed_by=school_admin_user,
     )
     card = build_principal_notification_evidence_card(
         tenant=school,

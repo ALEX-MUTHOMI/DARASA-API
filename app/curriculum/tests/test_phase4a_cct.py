@@ -249,6 +249,7 @@ def test_publication_state_machine_blocks_bypass_transitions():
 def test_authority_source_artifact_and_change_set_workflow(
     curriculum_version,
     principal_user,
+    school_admin_user,
 ):
     authority = register_curriculum_authority(
         code="kicd",
@@ -293,12 +294,12 @@ def test_authority_source_artifact_and_change_set_workflow(
             effective_from="2026-01-01",
         )
 
-    approved = approve_change_set(change_set=change_set, reviewed_by=principal_user)
+    approved = approve_change_set(change_set=change_set, reviewed_by=school_admin_user)
     assert list(get_approved_change_sets()) == [approved]
     publication = publish_curriculum_version(
         change_set=approved,
         curriculum_version=curriculum_version,
-        approved_by=principal_user,
+        approved_by=school_admin_user,
         effective_from="2026-01-01",
         publication_notes="Reviewed official source update.",
     )
@@ -310,7 +311,7 @@ def test_authority_source_artifact_and_change_set_workflow(
 
 def test_publication_rejects_workflow_bypass_and_version_swap(
     curriculum_version,
-    principal_user,
+    school_admin_user,
     source_document,
 ):
     alternate_version = create_curriculum_version(
@@ -325,12 +326,12 @@ def test_publication_rejects_workflow_bypass_and_version_swap(
         change_type=CurriculumChangeSet.ChangeType.NEW_VERSION,
         summary="Reviewed official source update.",
     )
-    approved = approve_change_set(change_set=change_set, reviewed_by=principal_user)
+    approved = approve_change_set(change_set=change_set, reviewed_by=school_admin_user)
 
     with pytest.raises(ValidationError):
         create_curriculum_publication(
             curriculum_version=curriculum_version,
-            approved_by=principal_user,
+            approved_by=school_admin_user,
             effective_from="2026-01-01",
             publication_notes="Direct active publication bypass.",
         )
@@ -339,22 +340,22 @@ def test_publication_rejects_workflow_bypass_and_version_swap(
         publish_curriculum_version(
             change_set=approved,
             curriculum_version=alternate_version,
-            approved_by=principal_user,
+            approved_by=school_admin_user,
             effective_from="2026-01-01",
         )
 
 
-def test_review_actions_require_active_reviewer(source_document, principal_user):
+def test_review_actions_require_active_reviewer(source_document, school_admin_user):
     change_set = create_curriculum_change_set(
         source_document=source_document,
         change_type=CurriculumChangeSet.ChangeType.SOURCE_CHANGED,
         summary="Official source change proposed.",
     )
-    principal_user.is_active = False
-    principal_user.save(update_fields=["is_active"])
+    school_admin_user.is_active = False
+    school_admin_user.save(update_fields=["is_active"])
 
     with pytest.raises(ValidationError):
-        approve_change_set(change_set=change_set, reviewed_by=principal_user)
+        approve_change_set(change_set=change_set, reviewed_by=school_admin_user)
 
 
 def test_inactive_authority_cannot_register_source():
@@ -377,14 +378,14 @@ def test_inactive_authority_cannot_register_source():
         )
 
 
-def test_rejected_change_remains_auditable(source_document, principal_user):
+def test_rejected_change_remains_auditable(source_document, school_admin_user):
     change_set = create_curriculum_change_set(
         source_document=source_document,
         change_type=CurriculumChangeSet.ChangeType.SOURCE_CHANGED,
         summary="Official source changed but was rejected after review.",
     )
 
-    rejected = reject_change_set(change_set=change_set, reviewed_by=principal_user)
+    rejected = reject_change_set(change_set=change_set, reviewed_by=school_admin_user)
     assert rejected.status == CurriculumChangeSet.Status.REJECTED
     assert list(get_rejected_change_sets()) == [rejected]
 
@@ -392,14 +393,14 @@ def test_rejected_change_remains_auditable(source_document, principal_user):
         publish_curriculum_version(
             change_set=rejected,
             curriculum_version=rejected.proposed_curriculum_version,
-            approved_by=principal_user,
+            approved_by=school_admin_user,
             effective_from="2026-01-01",
         )
 
 
 def test_publication_preserves_old_versions(
     curriculum_version,
-    principal_user,
+    school_admin_user,
     source_document,
 ):
     change_set = create_curriculum_change_set(
@@ -408,17 +409,17 @@ def test_publication_preserves_old_versions(
         change_type=CurriculumChangeSet.ChangeType.NEW_VERSION,
         summary="Initial official publication reviewed.",
     )
-    approved = approve_change_set(change_set=change_set, reviewed_by=principal_user)
+    approved = approve_change_set(change_set=change_set, reviewed_by=school_admin_user)
     old_publication = publish_curriculum_version(
         change_set=approved,
         curriculum_version=curriculum_version,
-        approved_by=principal_user,
+        approved_by=school_admin_user,
         effective_from="2026-01-01",
         publication_notes="Initial reviewed publication.",
     )
     new_publication = create_curriculum_publication(
         curriculum_version=curriculum_version,
-        approved_by=principal_user,
+        approved_by=school_admin_user,
         effective_from="2027-01-01",
         publication_notes="Replacement reviewed publication.",
         is_active=False,

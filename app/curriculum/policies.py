@@ -12,7 +12,12 @@ from core.models import Role
 from core.policies import PolicyContext
 from core.selectors import user_has_role_in_tenant
 from curriculum.models import (
+    CurriculumAppImpactPlan,
+    CurriculumEvidenceSubmission,
+    CurriculumGovernanceDecision,
     CurriculumLearningArea,
+    CurriculumRollbackCandidate,
+    CurriculumVerificationReport,
     PrincipalNotificationEvidenceCard,
     SpecificLearningOutcome,
     TeacherReadinessRequirement,
@@ -22,6 +27,20 @@ from curriculum.models import (
 CURRICULUM_MANAGE_ROLES = frozenset(
     {
         Role.RoleCode.PRINCIPAL.value,
+        Role.RoleCode.SCHOOL_ADMIN.value,
+    }
+)
+
+CURRICULUM_EVIDENCE_SUBMITTER_ROLES = frozenset(
+    {
+        Role.RoleCode.PRINCIPAL.value,
+        Role.RoleCode.DEPUTY_PRINCIPAL.value,
+        Role.RoleCode.SCHOOL_ADMIN.value,
+    }
+)
+
+CURRICULUM_GOVERNANCE_ROLES = frozenset(
+    {
         Role.RoleCode.SCHOOL_ADMIN.value,
     }
 )
@@ -140,35 +159,40 @@ def can_register_curriculum_source(context: PolicyContext) -> bool:
 def can_approve_curriculum_source(context: PolicyContext) -> bool:
     return (
         context.action == "curriculum.cct.approve_source"
-        and _is_manager(context)
+        and _context_is_valid(context)
+        and context.role.code in CURRICULUM_GOVERNANCE_ROLES
     )
 
 
 def can_approve_change_set(context: PolicyContext) -> bool:
     return (
         context.action == "curriculum.cct.approve_change_set"
-        and _is_manager(context)
+        and _context_is_valid(context)
+        and context.role.code in CURRICULUM_GOVERNANCE_ROLES
     )
 
 
 def can_reject_change_set(context: PolicyContext) -> bool:
     return (
         context.action == "curriculum.cct.reject_change_set"
-        and _is_manager(context)
+        and _context_is_valid(context)
+        and context.role.code in CURRICULUM_GOVERNANCE_ROLES
     )
 
 
 def can_publish_curriculum_version(context: PolicyContext) -> bool:
     return (
         context.action == "curriculum.cct.publish_version"
-        and _is_manager(context)
+        and _context_is_valid(context)
+        and context.role.code in CURRICULUM_GOVERNANCE_ROLES
     )
 
 
 def can_supersede_curriculum_version(context: PolicyContext) -> bool:
     return (
         context.action == "curriculum.cct.supersede_version"
-        and _is_manager(context)
+        and _context_is_valid(context)
+        and context.role.code in CURRICULUM_GOVERNANCE_ROLES
     )
 
 
@@ -209,6 +233,103 @@ def can_resolve_dependent_app_context(context: PolicyContext) -> bool:
     )
 
 
+def can_submit_curriculum_evidence(context: PolicyContext) -> bool:
+    return (
+        context.action == "curriculum.cct.submit_evidence"
+        and _context_is_valid(context)
+        and context.role.code in CURRICULUM_EVIDENCE_SUBMITTER_ROLES
+    )
+
+
+def can_view_curriculum_evidence_submission(
+    context: PolicyContext,
+    *,
+    evidence_submission: CurriculumEvidenceSubmission,
+) -> bool:
+    return (
+        context.action == "curriculum.cct.view_evidence_submission"
+        and _context_is_valid(context)
+        and context.role.code in CURRICULUM_VIEW_ROLES
+        and evidence_submission.tenant_id == context.tenant.id
+    )
+
+
+def can_view_curriculum_verification_report(
+    context: PolicyContext,
+    *,
+    verification_report: CurriculumVerificationReport,
+) -> bool:
+    return (
+        context.action == "curriculum.cct.view_verification_report"
+        and _context_is_valid(context)
+        and context.role.code in CURRICULUM_VIEW_ROLES
+        and verification_report.tenant_id == context.tenant.id
+    )
+
+
+def can_record_curriculum_governance_decision(context: PolicyContext) -> bool:
+    return (
+        context.action == "curriculum.cct.record_governance_decision"
+        and _context_is_valid(context)
+        and context.role.code in CURRICULUM_GOVERNANCE_ROLES
+    )
+
+
+def can_view_curriculum_governance_decision(
+    context: PolicyContext,
+    *,
+    governance_decision: CurriculumGovernanceDecision,
+) -> bool:
+    return (
+        context.action == "curriculum.cct.view_governance_decision"
+        and _context_is_valid(context)
+        and context.role.code in CURRICULUM_VIEW_ROLES
+        and governance_decision.tenant_id == context.tenant.id
+    )
+
+
+def can_plan_curriculum_app_impact(context: PolicyContext) -> bool:
+    return (
+        context.action == "curriculum.cct.plan_app_impact"
+        and _context_is_valid(context)
+        and context.role.code in CURRICULUM_EVIDENCE_SUBMITTER_ROLES
+    )
+
+
+def can_view_curriculum_app_impact_plan(
+    context: PolicyContext,
+    *,
+    app_impact_plan: CurriculumAppImpactPlan,
+) -> bool:
+    return (
+        context.action == "curriculum.cct.view_app_impact_plan"
+        and _context_is_valid(context)
+        and context.role.code in CURRICULUM_VIEW_ROLES
+        and app_impact_plan.tenant_id == context.tenant.id
+    )
+
+
+def can_create_curriculum_rollback_candidate(context: PolicyContext) -> bool:
+    return (
+        context.action == "curriculum.cct.create_rollback_candidate"
+        and _context_is_valid(context)
+        and context.role.code in CURRICULUM_EVIDENCE_SUBMITTER_ROLES
+    )
+
+
+def can_view_curriculum_rollback_candidate(
+    context: PolicyContext,
+    *,
+    rollback_candidate: CurriculumRollbackCandidate,
+) -> bool:
+    return (
+        context.action == "curriculum.cct.view_rollback_candidate"
+        and _context_is_valid(context)
+        and context.role.code in CURRICULUM_VIEW_ROLES
+        and rollback_candidate.tenant_id == context.tenant.id
+    )
+
+
 def can_view_regulatory_notice(context: PolicyContext) -> bool:
     return (
         context.action == "curriculum.regulatory.view"
@@ -220,21 +341,24 @@ def can_view_regulatory_notice(context: PolicyContext) -> bool:
 def can_register_regulatory_notice(context: PolicyContext) -> bool:
     return (
         context.action == "curriculum.regulatory.register"
-        and _is_manager(context)
+        and _context_is_valid(context)
+        and context.role.code in CURRICULUM_GOVERNANCE_ROLES
     )
 
 
 def can_review_regulatory_notice(context: PolicyContext) -> bool:
     return (
         context.action == "curriculum.regulatory.review"
-        and _is_manager(context)
+        and _context_is_valid(context)
+        and context.role.code in CURRICULUM_GOVERNANCE_ROLES
     )
 
 
 def can_classify_regulatory_notice(context: PolicyContext) -> bool:
     return (
         context.action == "curriculum.regulatory.classify"
-        and _is_manager(context)
+        and _context_is_valid(context)
+        and context.role.code in CURRICULUM_GOVERNANCE_ROLES
     )
 
 

@@ -57,12 +57,12 @@ from grading.models import Assessment
 pytestmark = [pytest.mark.django_db, pytest.mark.phase4]
 
 
-def _publish(curriculum_version, principal_user) -> CurriculumPublication:
+def _publish(curriculum_version, school_admin_user) -> CurriculumPublication:
     return create_curriculum_publication(
         curriculum_version=curriculum_version,
         effective_from=date(2026, 1, 1),
         publication_notes="Reviewed publication for controlled school adoption.",
-        approved_by=principal_user,
+        approved_by=school_admin_user,
         workflow_approved=True,
     )
 
@@ -145,6 +145,7 @@ def test_cct_fortification_migration_and_models_use_uuid_primary_keys(app_root):
 def test_adoption_requires_published_version_and_is_tenant_specific(
     curriculum_version,
     principal_user,
+    school_admin_user,
     school,
 ):
     with pytest.raises(ValidationError):
@@ -155,7 +156,7 @@ def test_adoption_requires_published_version_and_is_tenant_specific(
             scheduled_by=principal_user,
         )
 
-    _publish(curriculum_version, principal_user)
+    _publish(curriculum_version, school_admin_user)
     adoption = schedule_school_curriculum_adoption(
         tenant=school,
         curriculum_version=curriculum_version,
@@ -176,13 +177,14 @@ def test_withdrawn_version_blocks_new_adoption_and_emits_reference_event(
     curriculum_version,
     django_capture_on_commit_callbacks,
     principal_user,
+    school_admin_user,
     school,
 ):
-    _publish(curriculum_version, principal_user)
+    _publish(curriculum_version, school_admin_user)
     with django_capture_on_commit_callbacks(execute=True):
         withdrawal = mark_curriculum_version_withdrawn(
             curriculum_version=curriculum_version,
-            withdrawn_by=principal_user,
+            withdrawn_by=school_admin_user,
             reason="Official source withdrew this curriculum version.",
         )
 
@@ -211,10 +213,11 @@ def test_grading_dependency_guard_requires_school_adoption(
     curriculum_version,
     learning_area,
     principal_user,
+    school_admin_user,
     school,
 ):
     rubric = _rubric(curriculum_learning_area)
-    _publish(curriculum_version, principal_user)
+    _publish(curriculum_version, school_admin_user)
 
     with pytest.raises(ValidationError):
         validate_curriculum_context_for_grading_binding(
@@ -254,10 +257,11 @@ def test_withdrawal_does_not_mutate_historical_assessment_context(
     curriculum_version,
     learning_area,
     principal_user,
+    school_admin_user,
     school,
 ):
     rubric = _rubric(curriculum_learning_area)
-    _publish(curriculum_version, principal_user)
+    _publish(curriculum_version, school_admin_user)
     schedule_school_curriculum_adoption(
         tenant=school,
         curriculum_version=curriculum_version,
@@ -275,7 +279,7 @@ def test_withdrawal_does_not_mutate_historical_assessment_context(
 
     mark_curriculum_version_withdrawn(
         curriculum_version=curriculum_version,
-        withdrawn_by=principal_user,
+        withdrawn_by=school_admin_user,
         reason="Withdrawn for controlled rollback planning.",
     )
     assessment.refresh_from_db()
@@ -328,14 +332,14 @@ def test_dependency_algorithms_fail_closed_and_are_side_effect_safe():
 
 def test_notice_batch_is_bounded_and_reference_only(
     django_capture_on_commit_callbacks,
-    principal_user,
+    school_admin_user,
 ):
     with django_capture_on_commit_callbacks(execute=True):
         batch = create_notice_batch_run(
             notice_type=CurriculumNoticeBatchRun.NoticeType.PRINCIPAL_EVIDENCE,
             total_count=2500,
             batch_size=500,
-            created_by=principal_user,
+            created_by=school_admin_user,
             notes="Batch principal evidence notices.",
         )
 
