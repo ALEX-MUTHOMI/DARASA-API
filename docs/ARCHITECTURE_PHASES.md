@@ -93,6 +93,16 @@ confirmation, rate limits, WAF/DDoS controls, private storage, worker retries,
 dead-letter handling, and operational monitoring remain production deployment
 requirements rather than hidden application shortcuts.
 
+Phase 6D adds grading readiness dashboards and report-ready projections. It is
+a backend readiness layer, not report generation. It consumes submitted grade
+batches, compiled Phase 6C facts, teacher assignment context, and CCT adoption /
+withdrawal / rollback / app-impact state to answer whether the school can
+safely proceed toward reports. Teacher, HOD, deputy/head, principal, and future
+parent-safe projections derive from the same academic truth and stay role
+scoped. Future parent readiness remains fail-closed until approved release and
+guardian-link models exist. Reports, PDFs, frontend dashboards, parent portal
+UI, and NLP remain future phases.
+
 The production-readiness backlog in `PRODUCTION_READINESS_BACKLOG.md` is the
 canonical list of remaining platform, security, observability, operations, CCT,
 grading, and governance work. CCT is application-architecture stable; CCT
@@ -100,7 +110,7 @@ public uploads and Darasa-Core as a whole are not production-ready yet.
 
 ## Active Boundary Rules
 
-The default unit test command includes Phase 1 through Phase 6C work and
+The default unit test command includes Phase 1 through Phase 6D work and
 continues to exclude future markers, integration-heavy tests, and chaos tests.
 Darasa also has explicit test gates: Patch/Turbo for fast feedback, Domain for
 changed-domain verification, Full for phase closeout, and Deep for
@@ -123,3 +133,6 @@ Published curriculum is not school adoption. New grading assessments require a
 published version that the tenant has explicitly adopted. Existing operational
 assessments, submitted grades, and compiled snapshots preserve their original
 curriculum context if CCT later publishes, withdraws, or rolls back a version.
+Readiness projections may surface those CCT states as blockers or review flags,
+but they do not silently rebind curriculum context or alter historical academic
+records.

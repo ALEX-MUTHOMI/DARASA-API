@@ -135,6 +135,20 @@ must not recalculate academic meaning per role. HOD compilation visibility is
 assignment-scoped until a department ownership model exists. Future parent
 projection remains fail-closed until guardian-learner mapping is modeled.
 
+Phase 6D adds readiness projections over submitted and compiled facts. These
+projections identify report-readiness blockers such as missing marks, missing
+required components, unsubmitted batches, draft-only work, failed or stale
+compilations, pending corrections, CCT adoption gaps, withdrawals, rollback
+review, and CCT app-impact review. Teacher readiness is assignment-scoped, HOD
+readiness is department or learning-area scoped, deputy/head readiness is tenant
+academic-operations scoped, and principal readiness is tenant executive scoped.
+`is_staff` is not an academic visibility bypass. Future parent readiness remains
+fail-closed until an approved release model exists.
+
+Readiness must not mutate `Assessment`, `GradeRecord`, `GradeSubmissionBatch`,
+`CompilationRun`, compiled learner snapshots, or cohort summaries. It must not
+generate reports, PDFs, parent portal responses, or NLP text.
+
 After CCT fortification, grading and compilation consume CCT through explicit
 dependency guards. Future reports must consume compiled snapshots with their
 preserved curriculum context instead of re-resolving live curriculum truth.

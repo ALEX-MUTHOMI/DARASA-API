@@ -108,11 +108,40 @@ notes, unapproved corrections, and school-wide analytics. Until an explicit
 guardian-learner relationship model exists, parent projections fail closed even
 for users with a guardian role.
 
+## Phase 6D Readiness Projections
+
+Phase 6D is the backend readiness layer before reports. It asks whether a
+tenant, department, cohort, learning area, or assessment can safely proceed
+toward report generation. It consumes Phase 6B submitted grade batches, Phase
+6C compiled snapshots, teacher assignment context, and CCT adoption /
+withdrawal / rollback / app-impact state.
+
+Readiness is not a second compiler. It interprets the compiled facts and
+records blockers such as missing marks, missing required components,
+unsubmitted teacher batches, drafts without final submission, failed or stale
+compilations, pending corrections, CCT adoption gaps, withdrawals, rollback
+review, and app-impact review. It must not mutate `GradeRecord`,
+`GradeSubmissionBatch`, `CompilationRun`, compiled snapshots, or stored
+CBE/CCT assessment bindings.
+
+Teacher readiness is assignment-scoped. HOD readiness is department or
+learning-area scoped through teacher assignment. Deputy/head-of-academics
+readiness is tenant academic-operations scoped. Principal readiness is tenant
+executive-readiness scoped. Future parent readiness remains a fail-closed
+foundation until approved release data and guardian relationships exist; it
+must not expose drafts, internal corrections, teacher private notes, school-wide
+analytics, other learners' data, or unapproved compilations.
+
+CCT blockers are review and safety signals. A withdrawal or rollback review can
+block report readiness for future action, but it does not rewrite historical
+assessments, submitted grades, or compiled snapshots.
+
 ## Phase Boundaries
 
-Compilation is separate from report generation. Phase 6C can compile
-report-ready summaries. Report generation and PDFs belong to Phase 7. Safe NLP
-boundaries remain Phase 9 or later and cannot decide academic records.
+Compilation is separate from readiness, and readiness is separate from report
+generation. Phase 6C compiles canonical facts. Phase 6D projects operational
+readiness over those facts. Report generation and PDFs belong to Phase 7. Safe
+NLP boundaries remain Phase 9 or later and cannot decide academic records.
 
 NLP or generated text must never decide grades. Human academic records remain
 database-backed, auditable, tenant-scoped, and policy-controlled.
@@ -120,9 +149,9 @@ database-backed, auditable, tenant-scoped, and policy-controlled.
 ## Production Readiness Backlog
 
 `PRODUCTION_READINESS_BACKLOG.md` records grading work that remains before
-national production rollout. Phase 6D readiness dashboards / report-ready
-projections come next. Reports, PDFs, parent analytics, and NLP remain later
-phases. Grading production blockers include report readiness gates,
-large-roster performance profiling, stale compilation handling, correction
+national production rollout. Phase 6D adds readiness dashboards / report-ready
+projections, but it is still not a report generator. Reports, PDFs, parent
+analytics, and NLP remain later phases. Grading production blockers include
+large-roster performance profiling, stale compilation operations, correction
 workflow hardening, teacher workload stress testing, production step-up
 integration, audit expansion, and frontend retry/idempotency behavior.

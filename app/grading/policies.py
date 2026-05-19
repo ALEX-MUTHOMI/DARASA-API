@@ -265,3 +265,76 @@ def can_view_future_parent_projection(context: PolicyContext, *, tenant: Any) ->
     if context.tenant != tenant:
         return False
     return False
+
+
+def can_compute_readiness(context: PolicyContext, *, assessment: Assessment) -> bool:
+    if context.action != "grading.readiness.compute":
+        return False
+    if not _in_tenant(context, assessment):
+        return False
+    if not _context_is_valid(context):
+        return False
+    if context.role.code in GRADING_EXECUTIVE_ROLES:
+        return True
+    if context.role.code == Role.RoleCode.HOD.value:
+        return _has_assignment_for_assessment(context, assessment=assessment)
+    return False
+
+
+def can_view_teacher_readiness(
+    context: PolicyContext,
+    *,
+    assessment: Assessment,
+) -> bool:
+    if context.action != "grading.readiness.teacher.view":
+        return False
+    return _has_assignment_for_assessment(context, assessment=assessment)
+
+
+def can_view_hod_readiness(context: PolicyContext, *, assessment: Assessment) -> bool:
+    if context.action != "grading.readiness.hod.view":
+        return False
+    if not _context_is_valid(context) or context.role.code != Role.RoleCode.HOD.value:
+        return False
+    return _has_assignment_for_assessment(context, assessment=assessment)
+
+
+def can_view_academic_head_readiness(
+    context: PolicyContext,
+    *,
+    assessment: Assessment | None = None,
+) -> bool:
+    if context.action != "grading.readiness.academic_head.view":
+        return False
+    if not _context_is_valid(context):
+        return False
+    if context.role.code not in GRADING_EXECUTIVE_ROLES:
+        return False
+    return assessment is None or _in_tenant(context, assessment)
+
+
+def can_view_principal_readiness(
+    context: PolicyContext,
+    *,
+    assessment: Assessment | None = None,
+) -> bool:
+    if context.action != "grading.readiness.principal.view":
+        return False
+    if not _context_is_valid(context):
+        return False
+    if context.role.code not in {
+        Role.RoleCode.PRINCIPAL.value,
+        Role.RoleCode.SCHOOL_ADMIN.value,
+    }:
+        return False
+    return assessment is None or _in_tenant(context, assessment)
+
+
+def can_view_future_parent_readiness(context: PolicyContext, *, tenant: Any) -> bool:
+    """Fail closed until approved report-release and guardian mapping exist."""
+
+    if context.action != "grading.readiness.future_parent.view":
+        return False
+    if context.tenant != tenant:
+        return False
+    return False

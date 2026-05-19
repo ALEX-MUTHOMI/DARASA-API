@@ -22,6 +22,8 @@ from grading.algorithms.cohort_summary_builder import build_cohort_summary
 from grading.algorithms.compilation_inputs import build_compilation_input
 from grading.algorithms.compilation_status import determine_compilation_status
 from grading.algorithms.component_summary import detect_invalid_component_scores
+from grading.algorithms.component_readiness import component_readiness_blockers
+from grading.algorithms.cct_readiness_guard import cct_readiness_blockers
 from grading.algorithms.draft_merge import (
     normalize_draft_rows,
     validate_draft_version,
@@ -29,8 +31,15 @@ from grading.algorithms.draft_merge import (
 from grading.algorithms.grade_grid_builder import build_grid_contract
 from grading.algorithms.learner_snapshot_builder import build_learner_snapshots
 from grading.algorithms.missing_marks import detect_missing_marks
+from grading.algorithms.readiness_blockers import blocker
+from grading.algorithms.report_readiness_rules import build_report_readiness_summary
 from grading.algorithms.role_projection_builder import build_role_projection
+from grading.algorithms.role_readiness_projection import (
+    build_future_parent_readiness_projection,
+    build_readiness_projection,
+)
 from grading.algorithms.roster_resolver import stable_roster_rows
+from grading.algorithms.stale_compilation_detector import detect_stale_compilation
 from grading.algorithms.submission_confirmation import validate_confirmation
 from grading.algorithms.submission_idempotency import (
     canonical_payload_hash,
@@ -52,16 +61,30 @@ from grading.models import (
 )
 from grading.policies import (
     can_compile_assessment,
+    can_compute_readiness,
+    can_view_academic_head_readiness,
     can_view_deputy_academics_compilation,
+    can_view_future_parent_readiness,
     can_view_future_parent_projection,
     can_view_hod_compilation,
+    can_view_hod_readiness,
     can_view_principal_compilation,
+    can_view_principal_readiness,
     can_view_teacher_compilation,
+    can_view_teacher_readiness,
 )
 from grading.selectors import (
+    get_academic_head_readiness_scope,
     get_assessment_for_teacher,
     get_assessment_components_for_compilation,
+    get_cct_blockers_for_assessment,
     get_compiled_learner_snapshots,
+    get_hod_readiness_scope,
+    get_latest_compilation_for_assessment,
+    get_pending_corrections_for_assessment,
+    get_principal_readiness_scope,
+    get_readiness_batches_for_assessment,
+    get_readiness_drafts_for_assessment,
     get_expected_roster_for_compilation,
     get_existing_draft_for_teacher,
     get_existing_submission_for_assessment,
@@ -71,6 +94,7 @@ from grading.selectors import (
     get_submitted_records_for_assessment,
     get_teacher_compilation_scope,
     get_teacher_grading_contexts,
+    get_teacher_readiness_scope,
 )
 
 
@@ -807,6 +831,386 @@ def compile_submission_batch(
         assessment_id=batch.assessment_id,
         requested_by=requested_by,
     )
+
+
+def _build_assessment_readiness(
+    *,
+    tenant: Any,
+    assessment: Assessment,
+) -> dict[str, Any]:
+    run = get_latest_compilation_for_assessment(tenant=tenant, assessment=assessment)
+    cohort_summary = getattr(run, "cohort_summary", None) if run else None
+    batches = list(
+        get_readiness_batches_for_assessment(
+            tenant=tenant,
+            assessment=assessment,
+        )
+    )
+    submitted_batches = [
+        batch
+        for batch in batches
+        if batch.status
+        in {
+            GradeSubmissionBatch.Status.SUBMITTED,
+            GradeSubmissionBatch.Status.VALIDATED,
+            GradeSubmissionBatch.Status.COMPILED,
+        }
+    ]
+    drafts = list(
+        get_readiness_drafts_for_assessment(
+            tenant=tenant,
+            assessment=assessment,
+        )
+    )
+    corrections = list(
+        get_pending_corrections_for_assessment(tenant=tenant, assessment=assessment)
+    )
+    cct_state = get_cct_blockers_for_assessment(tenant=tenant, assessment=assessment)
+    blockers = []
+    if run is None:
+        blockers.append(
+            blocker(
+                code="no_compilation",
+                message="No compilation run exists for this assessment.",
+            )
+        )
+    elif run.status == CompilationRun.Status.FAILED:
+        blockers.append(
+            blocker(
+                code="failed_compilation",
+                message="Latest compilation failed.",
+                resource_id=run.id,
+            )
+        )
+    elif run.status == CompilationRun.Status.BLOCKED:
+        blockers.append(
+            blocker(
+                code="blocked_compilation",
+                message="Latest compilation is blocked.",
+                resource_id=run.id,
+            )
+        )
+    if run is not None and run.missing_learner_count > 0:
+        blockers.append(
+            blocker(
+                code="missing_marks",
+                message="One or more active learners are missing official marks.",
+                scope="learner",
+            )
+        )
+    if not submitted_batches:
+        blockers.append(
+            blocker(
+                code="teacher_submission_missing",
+                message="No submitted teacher batch exists for this assessment.",
+            )
+        )
+    if drafts and not submitted_batches:
+        blockers.append(
+            blocker(
+                code="draft_unsubmitted",
+                message="A draft exists but final submission is missing.",
+            )
+        )
+    if corrections:
+        blockers.append(
+            blocker(
+                code="correction_pending",
+                message="Pending correction requests block report readiness.",
+                scope="correction",
+            )
+        )
+    component_summary = (
+        cohort_summary.component_summary if cohort_summary is not None else {}
+    )
+    blockers.extend(component_readiness_blockers(component_summary=component_summary))
+    latest_batch_at = max(
+        [batch.submitted_at for batch in submitted_batches if batch.submitted_at],
+        default=None,
+    )
+    correction_timestamps = [
+        correction.requested_at
+        for correction in corrections
+        if correction.requested_at
+    ]
+    latest_correction_at = max(correction_timestamps, default=None)
+    freshness = detect_stale_compilation(
+        compilation_status=getattr(run, "status", None),
+        compiled_at=getattr(run, "compiled_at", None),
+        assessment_updated_at=assessment.updated_at,
+        latest_batch_submitted_at=latest_batch_at,
+        latest_correction_requested_at=latest_correction_at,
+    )
+    if freshness.is_stale:
+        blockers.append(
+            blocker(
+                code="stale_compilation",
+                message="Compilation is stale and must be reviewed.",
+                resource_id=getattr(run, "id", ""),
+            )
+        )
+    blockers.extend(
+        cct_readiness_blockers(
+            assessment_is_bound=assessment.is_operationally_bound(),
+            has_school_adoption=bool(cct_state["has_school_adoption"]),
+            curriculum_version_withdrawn=bool(
+                cct_state["curriculum_version_withdrawn"]
+            ),
+            rollback_plan_count=int(cct_state["rollback_plan_count"]),
+            app_impact_plan_count=int(cct_state["app_impact_plan_count"]),
+        )
+    )
+    expected_count = (
+        cohort_summary.expected_learner_count if cohort_summary is not None else 0
+    )
+    submitted_count = (
+        cohort_summary.submitted_learner_count if cohort_summary is not None else 0
+    )
+    missing_count = (
+        cohort_summary.missing_learner_count if cohort_summary is not None else 0
+    )
+    return build_report_readiness_summary(
+        assessment_id=assessment.id,
+        cohort_id=assessment.cohort_id,
+        learning_area_id=assessment.learning_area_id,
+        curriculum_version_id=assessment.curriculum_version_id,
+        compilation_run_id=getattr(run, "id", None),
+        compilation_status=getattr(run, "status", None),
+        expected_learner_count=expected_count,
+        submitted_learner_count=submitted_count,
+        missing_learner_count=missing_count,
+        blocker_items=blockers,
+        has_submitted_batch=bool(submitted_batches),
+        has_draft=bool(drafts),
+        pending_correction_count=len(corrections),
+    )
+
+
+def compute_assessment_readiness(
+    *,
+    actor: Any,
+    tenant: Any,
+    assessment_id: Any,
+) -> dict[str, Any]:
+    assessment = Assessment.objects.filter(tenant=tenant, id=assessment_id).first()
+    if assessment is None:
+        raise ValidationError({"assessment": "Assessment is not available."})
+    context = _policy_context(
+        actor=actor,
+        tenant=tenant,
+        action="grading.readiness.compute",
+        role_codes={
+            Role.RoleCode.HOD.value,
+            Role.RoleCode.DEPUTY_PRINCIPAL.value,
+            Role.RoleCode.PRINCIPAL.value,
+            Role.RoleCode.SCHOOL_ADMIN.value,
+        },
+    )
+    if not can_compute_readiness(context, assessment=assessment):
+        raise ValidationError(
+            {
+                "assessment": (
+                    "Readiness computation is not authorized."
+                )
+            }
+        )
+    return _build_assessment_readiness(tenant=tenant, assessment=assessment)
+
+
+def _authorized_readiness_items(
+    *,
+    tenant: Any,
+    assessments: list[Assessment],
+    context: PolicyContext,
+    policy_check: Any,
+) -> list[dict[str, Any]]:
+    visible = [
+        assessment
+        for assessment in assessments
+        if policy_check(context, assessment=assessment)
+    ]
+    return [
+        _build_assessment_readiness(tenant=tenant, assessment=assessment)
+        for assessment in visible
+    ]
+
+
+def compute_cohort_readiness(
+    *,
+    actor: Any,
+    tenant: Any,
+    cohort_id: Any,
+) -> dict[str, Any]:
+    return get_deputy_academics_readiness_projection(
+        actor=actor,
+        tenant=tenant,
+        filters={"cohort_id": cohort_id},
+    )
+
+
+def compute_department_readiness(
+    *,
+    actor: Any,
+    tenant: Any,
+    learning_area_id: Any,
+) -> dict[str, Any]:
+    return get_hod_readiness_projection(
+        actor=actor,
+        tenant=tenant,
+        filters={"learning_area_id": learning_area_id},
+    )
+
+
+def compute_school_report_readiness(
+    *,
+    actor: Any,
+    tenant: Any,
+    filters: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    return get_principal_readiness_projection(
+        actor=actor,
+        tenant=tenant,
+        filters=filters,
+    )
+
+
+def get_teacher_readiness_projection(
+    *,
+    actor: Any,
+    tenant: Any,
+    assessment_id: Any | None = None,
+) -> dict[str, Any]:
+    assessments = list(
+        get_teacher_readiness_scope(
+            actor=actor,
+            tenant=tenant,
+            assessment_id=assessment_id,
+        )
+    )
+    if not assessments:
+        return build_readiness_projection(
+            projection_type="teacher",
+            assessment_readiness=[],
+        )
+    context = _policy_context(
+        actor=actor,
+        tenant=tenant,
+        action="grading.readiness.teacher.view",
+        role_codes=GRADING_TEACHER_ROLE_CODES,
+    )
+    return build_readiness_projection(
+        projection_type="teacher",
+        assessment_readiness=_authorized_readiness_items(
+            tenant=tenant,
+            assessments=assessments,
+            context=context,
+            policy_check=can_view_teacher_readiness,
+        ),
+    )
+
+
+def get_hod_readiness_projection(
+    *,
+    actor: Any,
+    tenant: Any,
+    filters: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    context = _policy_context(
+        actor=actor,
+        tenant=tenant,
+        action="grading.readiness.hod.view",
+        role_codes={Role.RoleCode.HOD.value},
+    )
+    return build_readiness_projection(
+        projection_type="hod",
+        assessment_readiness=_authorized_readiness_items(
+            tenant=tenant,
+            assessments=list(
+                get_hod_readiness_scope(actor=actor, tenant=tenant, filters=filters)
+            ),
+            context=context,
+            policy_check=can_view_hod_readiness,
+        ),
+    )
+
+
+def get_deputy_academics_readiness_projection(
+    *,
+    actor: Any,
+    tenant: Any,
+    filters: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    context = _policy_context(
+        actor=actor,
+        tenant=tenant,
+        action="grading.readiness.academic_head.view",
+        role_codes={
+            Role.RoleCode.DEPUTY_PRINCIPAL.value,
+            Role.RoleCode.PRINCIPAL.value,
+            Role.RoleCode.SCHOOL_ADMIN.value,
+        },
+    )
+    if not can_view_academic_head_readiness(context):
+        return build_readiness_projection(
+            projection_type="deputy_head_academics",
+            assessment_readiness=[],
+        )
+    assessments = list(
+        get_academic_head_readiness_scope(tenant=tenant, filters=filters)
+    )
+    return build_readiness_projection(
+        projection_type="deputy_head_academics",
+        assessment_readiness=[
+            _build_assessment_readiness(tenant=tenant, assessment=assessment)
+            for assessment in assessments
+            if can_view_academic_head_readiness(context, assessment=assessment)
+        ],
+    )
+
+
+def get_principal_readiness_projection(
+    *,
+    actor: Any,
+    tenant: Any,
+    filters: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    context = _policy_context(
+        actor=actor,
+        tenant=tenant,
+        action="grading.readiness.principal.view",
+        role_codes={Role.RoleCode.PRINCIPAL.value, Role.RoleCode.SCHOOL_ADMIN.value},
+    )
+    if not can_view_principal_readiness(context):
+        return build_readiness_projection(
+            projection_type="principal",
+            assessment_readiness=[],
+        )
+    assessments = list(get_principal_readiness_scope(tenant=tenant, filters=filters))
+    return build_readiness_projection(
+        projection_type="principal",
+        assessment_readiness=[
+            _build_assessment_readiness(tenant=tenant, assessment=assessment)
+            for assessment in assessments
+            if can_view_principal_readiness(context, assessment=assessment)
+        ],
+    )
+
+
+def get_future_parent_report_readiness_projection(
+    *,
+    actor: Any,
+    tenant: Any,
+    learner_id: Any,
+) -> dict[str, Any]:
+    context = _policy_context(
+        actor=actor,
+        tenant=tenant,
+        action="grading.readiness.future_parent.view",
+        role_codes={Role.RoleCode.GUARDIAN.value},
+    )
+    if not can_view_future_parent_readiness(context, tenant=tenant):
+        return build_future_parent_readiness_projection()
+    return build_future_parent_readiness_projection()
 
 
 def get_teacher_compilation_projection(

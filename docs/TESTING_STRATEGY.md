@@ -74,6 +74,10 @@ audits and targeted drift scans. It should not run after every Codex edit.
   payload, no-crawler, phase-boundary, and non-mutating history tests reachable
   from `domain curriculum` or Deep Gate.
 - Grading change: run Patch Gate, then `domain grading`.
+- Phase 6D readiness change: during implementation run focused Phase 6D tests
+  and Patch Gate after the patch stabilizes; after implementation run
+  `domain grading`; at closeout run Full Gate. Run Deep Gate only if
+  security-sensitive boundaries changed.
 - Event contract change: run Patch Gate, then `domain events`.
 - Security-sensitive change: run the relevant Domain Gate; run Deep Gate if
   red-team or security behavior changed.

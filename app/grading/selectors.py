@@ -8,6 +8,12 @@ from uuid import UUID
 from django.db import models
 from django.db.models import QuerySet
 
+from curriculum.models import (
+    CurriculumAppImpactPlan,
+    CurriculumRollbackPlan,
+    CurriculumVersionWithdrawal,
+    SchoolCurriculumAdoption,
+)
 from grading.models import (
     Assessment,
     AssessmentComponent,
@@ -282,6 +288,182 @@ def get_latest_compilation_run(
         .order_by("-compiled_at", "-created_at")
         .first()
     )
+
+
+def get_latest_compilation_for_assessment(
+    *,
+    tenant: Any,
+    assessment: Assessment,
+) -> CompilationRun | None:
+    return get_latest_compilation_run(tenant=tenant, assessment=assessment)
+
+
+def get_assessment_readiness_scope(
+    *,
+    tenant: Any,
+    filters: dict[str, Any] | None = None,
+) -> QuerySet[Assessment]:
+    if tenant is None:
+        return Assessment.objects.none()
+    queryset = Assessment.objects.filter(tenant=tenant).select_related(
+        "cohort",
+        "learning_area",
+        "academic_year",
+        "term",
+        "curriculum_version",
+        "rubric_foundation",
+    )
+    filters = filters or {}
+    for field in ["academic_year_id", "term_id", "cohort_id", "learning_area_id"]:
+        if filters.get(field):
+            queryset = queryset.filter(**{field: filters[field]})
+    return queryset.order_by("cohort__name", "learning_area__name", "title")
+
+
+def get_teacher_readiness_scope(
+    *,
+    actor: Any,
+    tenant: Any,
+    assessment_id: Any | None = None,
+) -> QuerySet[Assessment]:
+    if actor is None or tenant is None:
+        return Assessment.objects.none()
+    queryset = get_assessment_readiness_scope(tenant=tenant).filter(
+        cohort__teacher_assignments__teacher=actor,
+        cohort__teacher_assignments__learning_area=models.F("learning_area"),
+        cohort__teacher_assignments__academic_year=models.F("academic_year"),
+        cohort__teacher_assignments__term=models.F("term"),
+        cohort__teacher_assignments__is_active=True,
+    )
+    if assessment_id is not None:
+        assessment_uuid = _safe_uuid(assessment_id)
+        if assessment_uuid is None:
+            return Assessment.objects.none()
+        queryset = queryset.filter(id=assessment_uuid)
+    return queryset.distinct()
+
+
+def get_hod_readiness_scope(
+    *,
+    actor: Any,
+    tenant: Any,
+    filters: dict[str, Any] | None = None,
+) -> QuerySet[Assessment]:
+    if actor is None or tenant is None:
+        return Assessment.objects.none()
+    queryset = get_teacher_readiness_scope(actor=actor, tenant=tenant)
+    learning_area_id = (filters or {}).get("learning_area_id")
+    if learning_area_id:
+        queryset = queryset.filter(learning_area_id=learning_area_id)
+    return queryset
+
+
+def get_academic_head_readiness_scope(
+    *,
+    tenant: Any,
+    filters: dict[str, Any] | None = None,
+) -> QuerySet[Assessment]:
+    return get_assessment_readiness_scope(tenant=tenant, filters=filters)
+
+
+def get_principal_readiness_scope(
+    *,
+    tenant: Any,
+    filters: dict[str, Any] | None = None,
+) -> QuerySet[Assessment]:
+    return get_assessment_readiness_scope(tenant=tenant, filters=filters)
+
+
+def get_readiness_batches_for_assessment(
+    *,
+    tenant: Any,
+    assessment: Assessment,
+) -> QuerySet[GradeSubmissionBatch]:
+    if tenant is None or assessment is None or assessment.tenant_id != tenant.id:
+        return GradeSubmissionBatch.objects.none()
+    return GradeSubmissionBatch.objects.filter(
+        tenant=tenant,
+        assessment=assessment,
+    ).order_by("-submitted_at", "-created_at")
+
+
+def get_readiness_drafts_for_assessment(
+    *,
+    tenant: Any,
+    assessment: Assessment,
+) -> QuerySet[GradeDraftBatch]:
+    if tenant is None or assessment is None or assessment.tenant_id != tenant.id:
+        return GradeDraftBatch.objects.none()
+    return GradeDraftBatch.objects.filter(
+        tenant=tenant,
+        assessment=assessment,
+        status=GradeDraftBatch.Status.DRAFT,
+    ).order_by("-updated_at")
+
+
+def get_pending_corrections_for_assessment(
+    *,
+    tenant: Any,
+    assessment: Assessment,
+) -> QuerySet[GradeCorrectionRequest]:
+    if tenant is None or assessment is None or assessment.tenant_id != tenant.id:
+        return GradeCorrectionRequest.objects.none()
+    return GradeCorrectionRequest.objects.filter(
+        tenant=tenant,
+        grade_record__assessment=assessment,
+        status=GradeCorrectionRequest.Status.REQUESTED,
+    ).order_by("-requested_at")
+
+
+def get_cct_blockers_for_assessment(
+    *,
+    tenant: Any,
+    assessment: Assessment,
+) -> dict[str, Any]:
+    if tenant is None or assessment is None or assessment.tenant_id != tenant.id:
+        return {
+            "has_school_adoption": False,
+            "curriculum_version_withdrawn": False,
+            "rollback_plan_count": 0,
+            "app_impact_plan_count": 0,
+        }
+    curriculum_version = assessment.curriculum_version
+    if curriculum_version is None:
+        return {
+            "has_school_adoption": False,
+            "curriculum_version_withdrawn": False,
+            "rollback_plan_count": 0,
+            "app_impact_plan_count": 0,
+        }
+    has_adoption = SchoolCurriculumAdoption.objects.filter(
+        tenant=tenant,
+        curriculum_version=curriculum_version,
+        status__in=[
+            SchoolCurriculumAdoption.Status.SCHEDULED,
+            SchoolCurriculumAdoption.Status.ACTIVE,
+        ],
+    ).exists()
+    withdrawn = CurriculumVersionWithdrawal.objects.filter(
+        curriculum_version=curriculum_version,
+        status=CurriculumVersionWithdrawal.Status.WITHDRAWN,
+    ).exists()
+    rollback_count = CurriculumRollbackPlan.objects.filter(
+        tenant=tenant,
+        withdrawn_version=curriculum_version,
+    ).count()
+    impact_count = CurriculumAppImpactPlan.objects.filter(
+        tenant=tenant,
+        status__in=[
+            CurriculumAppImpactPlan.Status.PLANNED,
+            CurriculumAppImpactPlan.Status.REVIEW_REQUIRED,
+        ],
+    ).count()
+    return {
+        "has_school_adoption": has_adoption,
+        "curriculum_version_withdrawn": withdrawn,
+        "rollback_plan_count": rollback_count,
+        "app_impact_plan_count": impact_count,
+    }
 
 
 def get_compiled_learner_snapshots(

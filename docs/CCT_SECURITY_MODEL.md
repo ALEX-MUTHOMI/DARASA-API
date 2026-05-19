@@ -16,6 +16,12 @@ classification must not run per mark or per grade record. Later CCT
 publications do not silently rebind old assessments; historical grade records
 remain tied to the assessment context used when grading began.
 
+Phase 6D grading readiness consumes CCT adoption, withdrawal, rollback, and app
+impact facts as bounded blockers. It does not call CCT source validation, crawl
+live sources, mutate CCT, or re-resolve curriculum truth per learner, mark, or
+grade record. A CCT blocker may stop report readiness or require review, but it
+does not mutate historical assessments, grade records, or compiled snapshots.
+
 ## Source Trust
 
 Official authorities are allowlisted by code and domain. Source URLs must use
