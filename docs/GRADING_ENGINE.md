@@ -136,6 +136,17 @@ CCT blockers are review and safety signals. A withdrawal or rollback review can
 block report readiness for future action, but it does not rewrite historical
 assessments, submitted grades, or compiled snapshots.
 
+CCT app-impact readiness blockers are tenant scoped, app-domain scoped, and
+matched against available assessment scope such as county metadata, pathway,
+grade level, learning area, and rubric. `scope_unknown` remains conservative
+and requires review. A scoped CCT impact for an unrelated county, learning
+area, or non-grading app domain must not block unrelated readiness.
+
+Darasa does not yet have a separate Phase 6E moderation workflow model. Phase
+6D blocks on pending correction requests and keeps moderation statuses as
+readiness vocabulary for the next grading phase; once moderation records exist,
+pending moderation must be a computed blocker rather than a client override.
+
 ## Phase Boundaries
 
 Compilation is separate from readiness, and readiness is separate from report

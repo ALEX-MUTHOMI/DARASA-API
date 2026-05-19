@@ -88,6 +88,16 @@ def test_stale_compilation_detector_is_deterministic():
     assert freshness.reasons == ("submission_after_compilation",)
 
 
+def test_missing_compilation_run_is_not_misclassified_as_stale():
+    freshness = detect_stale_compilation(
+        compilation_status=None,
+        compiled_at=None,
+    )
+
+    assert not freshness.is_stale
+    assert freshness.reasons == ()
+
+
 def test_cct_guard_flags_adoption_withdrawal_and_rollback_without_mutation():
     blockers = cct_readiness_blockers(
         assessment_is_bound=True,

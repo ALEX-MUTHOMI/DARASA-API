@@ -133,3 +133,9 @@ requested. It is not an authoritative gate. `--nomigrations` is not used by
 Patch, Domain, Full, or Deep gates because migration drift must remain visible.
 Parallel pytest workers may be added later behind `PYTEST_WORKERS`, but they
 are not enabled by default until database isolation is proven.
+
+Do not run multiple independent `docker compose run ... pytest` containers in
+parallel against the default local Postgres service. They share the same
+`test_darasa_core` database name and can collide while creating or dropping the
+test database. Use one gate at a time, or add isolated database names before
+attempting parallel local gate execution.

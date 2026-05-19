@@ -34,6 +34,85 @@ def _safe_uuid(value: Any) -> UUID | None:
         return None
 
 
+READINESS_CCT_APP_DOMAINS = frozenset(
+    {
+        "academics",
+        "assessments",
+        "examinations",
+        "grading",
+        "compilation",
+        "reports_future",
+    }
+)
+
+
+def _normalized_text(value: Any) -> str:
+    return str(value or "").strip().lower()
+
+
+def _scope_matches_any(value: Any, candidates: list[Any]) -> bool:
+    expected = _normalized_text(value)
+    if not expected:
+        return True
+    return expected in {_normalized_text(candidate) for candidate in candidates}
+
+
+def _metadata_scope_matches(*, tenant: Any, scope: dict[str, Any]) -> bool:
+    metadata = getattr(tenant, "metadata", {}) or {}
+    for key in [
+        "region",
+        "county",
+        "sub_county",
+        "school_category",
+        "senior_school_pathway",
+    ]:
+        if scope.get(key) and not _scope_matches_any(scope[key], [metadata.get(key)]):
+            return False
+    return True
+
+
+def _impact_scope_applies_to_assessment(
+    *,
+    tenant: Any,
+    assessment: Assessment,
+    scope: dict[str, Any] | None,
+) -> bool:
+    if not scope:
+        return True
+    if _normalized_text(scope.get("scope_type")) == "scope_unknown":
+        return True
+    if not _metadata_scope_matches(tenant=tenant, scope=scope):
+        return False
+    if scope.get("grade_level") and not _scope_matches_any(
+        scope["grade_level"],
+        [
+            assessment.grade_level_id,
+            getattr(assessment.grade_level, "code", ""),
+            getattr(assessment.grade_level, "name", ""),
+        ],
+    ):
+        return False
+    if scope.get("learning_area") and not _scope_matches_any(
+        scope["learning_area"],
+        [
+            assessment.learning_area_id,
+            getattr(assessment.learning_area, "code", ""),
+            getattr(assessment.learning_area, "name", ""),
+        ],
+    ):
+        return False
+    if scope.get("rubric") and not _scope_matches_any(
+        scope["rubric"],
+        [
+            assessment.rubric_foundation_id,
+            getattr(assessment.rubric_foundation, "level_code", ""),
+            getattr(assessment.rubric_foundation, "level_label", ""),
+        ],
+    ):
+        return False
+    return True
+
+
 def get_teacher_grading_contexts(
     *,
     actor: Any,
@@ -285,7 +364,11 @@ def get_latest_compilation_run(
         return None
     return (
         CompilationRun.objects.filter(tenant=tenant, assessment=assessment)
-        .order_by("-compiled_at", "-created_at")
+        .order_by(
+            "-created_at",
+            models.F("compiled_at").desc(nulls_last=True),
+            "-id",
+        )
         .first()
     )
 
@@ -451,13 +534,23 @@ def get_cct_blockers_for_assessment(
         tenant=tenant,
         withdrawn_version=curriculum_version,
     ).count()
-    impact_count = CurriculumAppImpactPlan.objects.filter(
+    impact_plans = CurriculumAppImpactPlan.objects.filter(
         tenant=tenant,
+        app_domain__in=READINESS_CCT_APP_DOMAINS,
         status__in=[
             CurriculumAppImpactPlan.Status.PLANNED,
             CurriculumAppImpactPlan.Status.REVIEW_REQUIRED,
         ],
-    ).count()
+    ).only("id", "affected_scope")
+    impact_count = sum(
+        1
+        for plan in impact_plans
+        if _impact_scope_applies_to_assessment(
+            tenant=tenant,
+            assessment=assessment,
+            scope=plan.affected_scope,
+        )
+    )
     return {
         "has_school_adoption": has_adoption,
         "curriculum_version_withdrawn": withdrawn,

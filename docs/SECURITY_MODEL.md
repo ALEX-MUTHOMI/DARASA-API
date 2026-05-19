@@ -145,6 +145,11 @@ academic-operations scoped, and principal readiness is tenant executive scoped.
 `is_staff` is not an academic visibility bypass. Future parent readiness remains
 fail-closed until an approved release model exists.
 
+CCT app-impact blockers must be scoped before they affect readiness. A tenant's
+unknown-scope grading/report impact requires review, but an unrelated county,
+learning-area, or non-grading future-app impact must not be treated as a
+school-wide readiness blocker.
+
 Readiness must not mutate `Assessment`, `GradeRecord`, `GradeSubmissionBatch`,
 `CompilationRun`, compiled learner snapshots, or cohort summaries. It must not
 generate reports, PDFs, parent portal responses, or NLP text.

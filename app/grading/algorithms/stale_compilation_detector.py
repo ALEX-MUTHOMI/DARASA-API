@@ -21,7 +21,7 @@ def detect_stale_compilation(
     reasons: list[str] = []
     if compilation_status == "stale":
         reasons.append("compilation_marked_stale")
-    if compiled_at is None:
+    if compilation_status is not None and compiled_at is None:
         reasons.append("compilation_missing_timestamp")
     if compiled_at is not None and assessment_updated_at is not None:
         if assessment_updated_at > compiled_at:
