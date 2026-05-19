@@ -92,6 +92,13 @@ component scores, report text, guardian contacts, teacher private notes, or
 NLP output. App impact planning remains stored as bounded review records rather
 than an event storm across schools, apps, learners, pages, or score cells.
 
+`PRODUCTION_READINESS_BACKLOG.md` records the event backbone production work
+that remains: external broker adapter, outbox hardening, dead-letter
+operations, replay policy, retention policy, idempotent consumer certification,
+schema registry hardening, payload PII scanning, dashboards, and a later broker
+migration plan. The current backbone remains application-level and
+broker-ready; it is not a production broker deployment.
+
 ## Ownership
 
 Changes under `app/events`, event docs, CI, Docker, settings, and scripts should

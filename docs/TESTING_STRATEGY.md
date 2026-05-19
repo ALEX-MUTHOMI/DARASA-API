@@ -83,6 +83,12 @@ audits and targeted drift scans. It should not run after every Codex edit.
 Codex must not claim a phase is complete after Patch Gate only. Codex should
 not run Full Gate after every tiny edit unless explicitly requested.
 
+`PRODUCTION_READINESS_BACKLOG.md` records the remaining quality work before
+production: load tests, tenant-scale tests, large roster tests, CCT upload abuse
+tests, event replay tests, chaos tests, backup restore drills, permission matrix
+tests, nightly Deep Gate, red-team regression, and proof before making parallel
+pytest execution the default.
+
 ## Changed-File Routing
 
 Use:

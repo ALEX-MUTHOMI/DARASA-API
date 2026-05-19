@@ -93,6 +93,11 @@ confirmation, rate limits, WAF/DDoS controls, private storage, worker retries,
 dead-letter handling, and operational monitoring remain production deployment
 requirements rather than hidden application shortcuts.
 
+The production-readiness backlog in `PRODUCTION_READINESS_BACKLOG.md` is the
+canonical list of remaining platform, security, observability, operations, CCT,
+grading, and governance work. CCT is application-architecture stable; CCT
+public uploads and Darasa-Core as a whole are not production-ready yet.
+
 ## Active Boundary Rules
 
 The default unit test command includes Phase 1 through Phase 6C work and

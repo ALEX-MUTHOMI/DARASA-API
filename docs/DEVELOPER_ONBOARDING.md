@@ -72,3 +72,11 @@ state. Governance approval requires a verification report plus clean malware
 status and passed content verification, and production upload endpoints must
 also enforce step-up confirmation, rate limits, private storage, and audit
 logging.
+
+## Production Readiness Backlog
+
+Use `docs/PRODUCTION_READINESS_BACKLOG.md` as the canonical source for work
+that remains before national production rollout. Do not treat backlog entries
+as complete because the application contract exists. Public CCT uploads,
+national rollout, reports, and production operations require their listed
+infrastructure, security, observability, and governance acceptance criteria.

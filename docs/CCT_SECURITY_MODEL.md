@@ -151,6 +151,13 @@ rejected evidence, rollback candidates, withdrawn versions, pending or failed
 notice batches, event dispatch failures, rate-limit violations, malware scan
 failures, and content-verification failures.
 
+`PRODUCTION_READINESS_BACKLOG.md` records the CCT blockers that remain before
+public uploads can be exposed: private object storage, scanner workers,
+content-verification workers, step-up confirmation, upload rate limits,
+dedicated curriculum governance roles, notice delivery workers, and CCT
+monitoring. These are production deployment blockers, not hidden features in
+the current application layer.
+
 ## Senior School Intelligence
 
 Phase 4C focuses on Senior School impact and tracks Junior-to-Senior signals

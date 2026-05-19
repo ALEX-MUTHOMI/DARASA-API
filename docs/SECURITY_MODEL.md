@@ -85,6 +85,13 @@ endpoints exist, Darasa must bind step-up confirmation to the same actor and
 tenant, expire it, rate-limit it, and avoid storing raw passwords, PINs, or
 device secrets.
 
+The production-readiness backlog in `PRODUCTION_READINESS_BACKLOG.md` records
+remaining security and compliance blockers: WAF/DDoS protection, global and
+tenant-aware rate limits, security headers, CSP, CSRF/session review, admin
+access hardening, secret rotation, audit log immutability, PII retention, data
+export controls, incident response runbooks, SAST/DAST strategy, dependency
+update policy, and threat-model review.
+
 ## Event Backbone
 
 Events are typed, versioned facts. Producers are allowlisted, tenant-scoped

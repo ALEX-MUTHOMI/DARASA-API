@@ -116,3 +116,13 @@ boundaries remain Phase 9 or later and cannot decide academic records.
 
 NLP or generated text must never decide grades. Human academic records remain
 database-backed, auditable, tenant-scoped, and policy-controlled.
+
+## Production Readiness Backlog
+
+`PRODUCTION_READINESS_BACKLOG.md` records grading work that remains before
+national production rollout. Phase 6D readiness dashboards / report-ready
+projections come next. Reports, PDFs, parent analytics, and NLP remain later
+phases. Grading production blockers include report readiness gates,
+large-roster performance profiling, stale compilation handling, correction
+workflow hardening, teacher workload stress testing, production step-up
+integration, audit expansion, and frontend retry/idempotency behavior.
