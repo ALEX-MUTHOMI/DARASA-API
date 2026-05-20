@@ -22,9 +22,13 @@ from grading.models import (
     CompiledLearnerSnapshot,
     GradeDraftBatch,
     GradeCorrectionRequest,
+    GradeCorrectionAuditRecord,
     GradeRecord,
     GradeSubmissionBatch,
+    SchoolGradingBand,
+    SchoolGradingSchema,
 )
+from grading.algorithms.correction_status import BLOCKING_CORRECTION_STATUSES
 
 
 def _safe_uuid(value: Any) -> UUID | None:
@@ -312,8 +316,12 @@ def get_pending_corrections_for_reviewer(
         return GradeCorrectionRequest.objects.none()
     return GradeCorrectionRequest.objects.filter(
         tenant=tenant,
-        status=GradeCorrectionRequest.Status.REQUESTED,
-    ).select_related("grade_record", "requested_by")
+        status__in=[
+            GradeCorrectionRequest.Status.REQUESTED,
+            GradeCorrectionRequest.Status.SUBMITTED,
+            GradeCorrectionRequest.Status.UNDER_HOD_REVIEW,
+        ],
+    ).select_related("grade_record", "grade_record__assessment", "requested_by")
 
 
 def get_submitted_records_for_assessment(
@@ -494,8 +502,167 @@ def get_pending_corrections_for_assessment(
     return GradeCorrectionRequest.objects.filter(
         tenant=tenant,
         grade_record__assessment=assessment,
-        status=GradeCorrectionRequest.Status.REQUESTED,
+        status__in=BLOCKING_CORRECTION_STATUSES,
     ).order_by("-requested_at")
+
+
+def get_teacher_correction_requests(
+    *,
+    actor: Any,
+    tenant: Any,
+) -> QuerySet[GradeCorrectionRequest]:
+    if actor is None or tenant is None:
+        return GradeCorrectionRequest.objects.none()
+    return (
+        GradeCorrectionRequest.objects.filter(tenant=tenant, requested_by=actor)
+        .select_related("grade_record", "grade_record__assessment", "reviewed_by")
+        .order_by("-requested_at")
+    )
+
+
+def get_hod_correction_queue(
+    *,
+    actor: Any,
+    tenant: Any,
+) -> QuerySet[GradeCorrectionRequest]:
+    if actor is None or tenant is None:
+        return GradeCorrectionRequest.objects.none()
+    return (
+        get_pending_corrections_for_reviewer(actor=actor, tenant=tenant)
+        .filter(
+            grade_record__assessment__cohort__teacher_assignments__teacher=actor,
+            **{
+                (
+                    "grade_record__assessment__cohort__teacher_assignments__"
+                    "learning_area"
+                ): models.F("grade_record__assessment__learning_area"),
+                (
+                    "grade_record__assessment__cohort__teacher_assignments__"
+                    "academic_year"
+                ): models.F("grade_record__assessment__academic_year"),
+            },
+            grade_record__assessment__cohort__teacher_assignments__term=models.F(
+                "grade_record__assessment__term"
+            ),
+            grade_record__assessment__cohort__teacher_assignments__is_active=True,
+        )
+        .distinct()
+    )
+
+
+def get_academic_head_correction_queue(
+    *,
+    tenant: Any,
+) -> QuerySet[GradeCorrectionRequest]:
+    if tenant is None:
+        return GradeCorrectionRequest.objects.none()
+    return (
+        GradeCorrectionRequest.objects.filter(
+            tenant=tenant,
+            status__in=[
+                GradeCorrectionRequest.Status.ESCALATION_REQUESTED,
+                GradeCorrectionRequest.Status.UNDER_ACADEMIC_HEAD_REVIEW,
+            ],
+        )
+        .select_related("grade_record", "grade_record__assessment", "requested_by")
+        .order_by("-escalated_at", "-requested_at")
+    )
+
+
+def get_correction_audit_trail(
+    *,
+    tenant: Any,
+    correction_request: GradeCorrectionRequest,
+) -> QuerySet[GradeCorrectionAuditRecord]:
+    if (
+        tenant is None
+        or correction_request is None
+        or correction_request.tenant_id != tenant.id
+    ):
+        return GradeCorrectionAuditRecord.objects.none()
+    return GradeCorrectionAuditRecord.objects.filter(
+        tenant=tenant,
+        correction_request=correction_request,
+    ).order_by("created_at", "id")
+
+
+def get_principal_correction_summary(*, tenant: Any) -> dict[str, int]:
+    if tenant is None:
+        return {"pending": 0, "escalated": 0, "approved_unapplied": 0}
+    queryset = GradeCorrectionRequest.objects.filter(tenant=tenant)
+    return {
+        "pending": queryset.filter(status__in=BLOCKING_CORRECTION_STATUSES).count(),
+        "escalated": queryset.filter(
+            status__in=[
+                GradeCorrectionRequest.Status.ESCALATION_REQUESTED,
+                GradeCorrectionRequest.Status.UNDER_ACADEMIC_HEAD_REVIEW,
+            ]
+        ).count(),
+        "approved_unapplied": queryset.filter(
+            status__in=[
+                GradeCorrectionRequest.Status.APPROVED,
+                GradeCorrectionRequest.Status.APPROVED_BY_HOD,
+                GradeCorrectionRequest.Status.APPROVED_BY_ACADEMIC_HEAD,
+            ]
+        ).count(),
+    }
+
+
+def get_active_school_grading_schema(
+    *,
+    tenant: Any,
+    assessment_type: str,
+) -> SchoolGradingSchema | None:
+    if tenant is None:
+        return None
+    return (
+        SchoolGradingSchema.objects.filter(
+            tenant=tenant,
+            assessment_type=assessment_type,
+            status__in=[
+                SchoolGradingSchema.Status.ACTIVE,
+                SchoolGradingSchema.Status.LOCKED,
+            ],
+        )
+        .order_by("-activated_at", "-created_at", "-id")
+        .first()
+    )
+
+
+def get_assessment_schema_binding(
+    *,
+    tenant: Any,
+    assessment: Assessment,
+) -> SchoolGradingSchema | None:
+    if tenant is None or assessment is None or assessment.tenant_id != tenant.id:
+        return None
+    return assessment.school_grading_schema
+
+
+def get_schema_history_for_tenant(
+    *,
+    tenant: Any,
+) -> QuerySet[SchoolGradingSchema]:
+    if tenant is None:
+        return SchoolGradingSchema.objects.none()
+    return SchoolGradingSchema.objects.filter(tenant=tenant).order_by(
+        "assessment_type",
+        "-created_at",
+    )
+
+
+def get_schema_bands_for_assessment(
+    *,
+    tenant: Any,
+    assessment: Assessment,
+) -> QuerySet[SchoolGradingBand]:
+    schema = get_assessment_schema_binding(tenant=tenant, assessment=assessment)
+    if schema is None:
+        return SchoolGradingBand.objects.none()
+    return SchoolGradingBand.objects.filter(
+        tenant=tenant,
+        schema=schema,
+    ).order_by("order", "min_percentage", "label")
 
 
 def get_cct_blockers_for_assessment(

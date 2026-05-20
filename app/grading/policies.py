@@ -13,7 +13,12 @@ from academics.models import TeacherAssignment
 from core.models import Role
 from core.policies import PolicyContext
 from core.selectors import user_has_role_in_tenant
-from grading.models import Assessment, GradeCorrectionRequest, GradeRecord
+from grading.models import (
+    Assessment,
+    GradeCorrectionRequest,
+    GradeRecord,
+    SchoolGradingSchema,
+)
 
 
 GRADING_ADMIN_ROLES = frozenset(
@@ -28,6 +33,12 @@ GRADING_EXECUTIVE_ROLES = frozenset(
         Role.RoleCode.PRINCIPAL.value,
         Role.RoleCode.SCHOOL_ADMIN.value,
         Role.RoleCode.DEPUTY_PRINCIPAL.value,
+    }
+)
+GRADING_ACADEMIC_HEAD_ROLES = frozenset(
+    {
+        Role.RoleCode.DEPUTY_PRINCIPAL.value,
+        Role.RoleCode.SCHOOL_ADMIN.value,
     }
 )
 GRADING_TEACHER_ROLES = frozenset(
@@ -171,6 +182,144 @@ def can_review_grade_correction(
     if correction.requested_by_id == getattr(context.actor, "id", None):
         return False
     return _is_admin(context)
+
+
+def can_submit_correction_request(
+    context: PolicyContext,
+    *,
+    grade_record: GradeRecord,
+) -> bool:
+    if context.action != "grading.correction.submit":
+        return False
+    return can_request_grade_correction(
+        PolicyContext(
+            tenant=context.tenant,
+            actor=context.actor,
+            action="grading.correction.request",
+            role=context.role,
+        ),
+        grade_record=grade_record,
+    )
+
+
+def can_review_hod_correction(
+    context: PolicyContext,
+    *,
+    correction: GradeCorrectionRequest,
+) -> bool:
+    if context.action != "grading.correction.hod.review":
+        return False
+    if not _context_is_valid(context):
+        return False
+    if context.role.code != Role.RoleCode.HOD.value:
+        return False
+    if not _in_tenant(context, correction):
+        return False
+    if correction.requested_by_id == getattr(context.actor, "id", None):
+        return False
+    return _has_assignment_for_assessment(
+        context,
+        assessment=correction.grade_record.assessment,
+    )
+
+
+def can_escalate_correction(
+    context: PolicyContext,
+    *,
+    correction: GradeCorrectionRequest,
+) -> bool:
+    if context.action != "grading.correction.escalate":
+        return False
+    if not _context_is_valid(context) or not _in_tenant(context, correction):
+        return False
+    return context.role.code in GRADING_ACADEMIC_HEAD_ROLES
+
+
+def can_review_academic_head_correction(
+    context: PolicyContext,
+    *,
+    correction: GradeCorrectionRequest,
+) -> bool:
+    if context.action != "grading.correction.academic_head.review":
+        return False
+    if not _context_is_valid(context) or not _in_tenant(context, correction):
+        return False
+    if correction.requested_by_id == getattr(context.actor, "id", None):
+        return False
+    return context.role.code in GRADING_ACADEMIC_HEAD_ROLES
+
+
+def can_apply_correction(
+    context: PolicyContext,
+    *,
+    correction: GradeCorrectionRequest,
+) -> bool:
+    if context.action != "grading.correction.apply":
+        return False
+    if not _context_is_valid(context) or not _in_tenant(context, correction):
+        return False
+    if correction.requested_by_id == getattr(context.actor, "id", None):
+        return False
+    if context.role.code == Role.RoleCode.HOD.value:
+        return _has_assignment_for_assessment(
+            context,
+            assessment=correction.grade_record.assessment,
+        )
+    return context.role.code in GRADING_ACADEMIC_HEAD_ROLES
+
+
+def can_view_correction_audit(
+    context: PolicyContext,
+    *,
+    correction: GradeCorrectionRequest,
+) -> bool:
+    if context.action != "grading.correction.audit.view":
+        return False
+    if not _in_tenant(context, correction):
+        return False
+    if not _context_is_valid(context):
+        return False
+    if context.role.code in GRADING_EXECUTIVE_ROLES:
+        return True
+    if context.role.code == Role.RoleCode.HOD.value:
+        return _has_assignment_for_assessment(
+            context,
+            assessment=correction.grade_record.assessment,
+        )
+    return correction.requested_by_id == getattr(context.actor, "id", None)
+
+
+def can_view_principal_correction_summary(context: PolicyContext) -> bool:
+    if context.action != "grading.correction.principal.summary.view":
+        return False
+    if not _context_is_valid(context):
+        return False
+    return context.role.code in {
+        Role.RoleCode.PRINCIPAL.value,
+        Role.RoleCode.SCHOOL_ADMIN.value,
+    }
+
+
+def can_manage_school_grading_schema(
+    context: PolicyContext,
+    *,
+    action: str,
+    schema: SchoolGradingSchema | None = None,
+    assessment: Assessment | None = None,
+) -> bool:
+    if context.action != action:
+        return False
+    if not _context_is_valid(context):
+        return False
+    if context.role.code not in GRADING_ACADEMIC_HEAD_ROLES | {
+        Role.RoleCode.PRINCIPAL.value,
+    }:
+        return False
+    if schema is not None and not _in_tenant(context, schema):
+        return False
+    if assessment is not None and not _in_tenant(context, assessment):
+        return False
+    return True
 
 
 def can_view_grade_completion_summary(

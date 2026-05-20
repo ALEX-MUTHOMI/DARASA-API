@@ -103,6 +103,17 @@ scoped. Future parent readiness remains fail-closed until approved release and
 guardian-link models exist. Reports, PDFs, frontend dashboards, parent portal
 UI, and NLP remain future phases.
 
+Phase 6E adds submitted-mark correction, HOD moderation, controlled escalation,
+PII-minimized audit records, and tenant-specific internal grading schema
+support. Teachers request corrections; HODs review inside assigned learning-area
+scope; deputy/head-of-academics style roles may handle explicit escalations;
+principals get executive correction risk visibility rather than casual mark
+edit authority. Approved corrections are applied through an audited service and
+mark compilation runs stale without mutating compiled snapshots. School
+internal schemas interpret CATs, internal exams, mocks, trial exams,
+departmental tests, and practical components per tenant and version, but they
+cannot override CBE/CCT curriculum truth.
+
 The production-readiness backlog in `PRODUCTION_READINESS_BACKLOG.md` is the
 canonical list of remaining platform, security, observability, operations, CCT,
 grading, and governance work. CCT is application-architecture stable; CCT
@@ -110,7 +121,7 @@ public uploads and Darasa-Core as a whole are not production-ready yet.
 
 ## Active Boundary Rules
 
-The default unit test command includes Phase 1 through Phase 6D work and
+The default unit test command includes Phase 1 through Phase 6E work and
 continues to exclude future markers, integration-heavy tests, and chaos tests.
 Darasa also has explicit test gates: Patch/Turbo for fast feedback, Domain for
 changed-domain verification, Full for phase closeout, and Deep for
@@ -136,3 +147,8 @@ curriculum context if CCT later publishes, withdraws, or rolls back a version.
 Readiness projections may surface those CCT states as blockers or review flags,
 but they do not silently rebind curriculum context or alter historical academic
 records.
+
+Submitted marks are academic records. Phase 6E corrections may update
+`GradeRecord` only after approved workflow and audit. They must not mutate CBE
+bindings or compiled snapshots, and they must not generate reports, PDFs,
+parent analytics, or NLP text.

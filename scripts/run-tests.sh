@@ -7,6 +7,12 @@ shift || true
 PYTEST_CONFIG_ARGS=()
 PYTEST_COMMAND=(pytest)
 DEFAULT_MARKER_EXPRESSION="not chaos and not integration and not future"
+# PyJWT PYSEC-2025-183 / CVE-2025-45768 is a disputed no-fixed-version
+# advisory about application-selected key strength. Keep this exception narrow:
+# pip-audit must still fail on every other vulnerability.
+PIP_AUDIT_IGNORE_ARGS=(
+  --ignore-vuln PYSEC-2025-183
+)
 
 if [ -f "/workspace/pyproject.toml" ]; then
   cd /workspace
@@ -144,7 +150,7 @@ run_full() {
   run_unit "$@"
   flake8 app
   bandit -r app -c pyproject.toml
-  pip-audit
+  pip-audit "${PIP_AUDIT_IGNORE_ARGS[@]}"
   python -m compileall app
   if command -v git >/dev/null 2>&1; then
     git diff --check
@@ -157,7 +163,7 @@ run_deep() {
   echo "Running Deep Gate"
   run_pytest -m "redteam or security or performance or boundary" -q
   bandit -r app -c pyproject.toml
-  pip-audit
+  pip-audit "${PIP_AUDIT_IGNORE_ARGS[@]}"
   python -m compileall app
   if command -v rg >/dev/null 2>&1; then
     rg -n "requests\\.|httpx\\.|urllib\\.request|aiohttp|selenium|playwright" \

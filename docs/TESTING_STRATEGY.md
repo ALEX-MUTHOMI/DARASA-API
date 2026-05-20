@@ -78,6 +78,11 @@ audits and targeted drift scans. It should not run after every Codex edit.
   and Patch Gate after the patch stabilizes; after implementation run
   `domain grading`; at closeout run Full Gate. Run Deep Gate only if
   security-sensitive boundaries changed.
+- Phase 6E correction/schema change: during implementation run focused Phase 6E
+  correction and school-schema tests plus Patch Gate after the patch
+  stabilizes; after implementation run `domain grading`; at closeout run Full
+  Gate and Deep Gate because mark alteration, audit, schema interpretation, and
+  PII boundaries are security-sensitive.
 - Event contract change: run Patch Gate, then `domain events`.
 - Security-sensitive change: run the relevant Domain Gate; run Deep Gate if
   red-team or security behavior changed.
@@ -125,6 +130,13 @@ hand-editing every file.
 
 Do not mark a test `slow` to hide a failure. Security-critical tests must stay
 reachable through a Domain Gate or Deep Gate.
+
+`pip-audit` runs with one narrow documented exception:
+`PYSEC-2025-183` / `CVE-2025-45768` for PyJWT. The advisory is disputed,
+currently has no fixed version, and concerns application-selected JWT key
+strength. Darasa must continue enforcing strong JWT signing secrets through
+configuration and secret-management policy. Any other dependency advisory must
+fail the gate.
 
 ## Performance Safety
 

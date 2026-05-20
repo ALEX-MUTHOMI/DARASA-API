@@ -78,11 +78,16 @@ Phase 6A introduces:
 - `GradeSubmissionBatch`: teacher, assignment, cohort, learning area, and
   idempotency boundary for future submissions.
 - `GradeRecord`: one learner score per assessment within a tenant.
-- `GradeCorrectionRequest`: auditable correction workflow with old-state hash.
+- `GradeCorrectionRequest`: controlled correction workflow with old-state hash.
+- `GradeCorrectionAuditRecord`: PII-minimized correction audit trail.
+- `SchoolGradingSchema` / `SchoolGradingBand`: tenant-owned internal grading
+  interpretation for CATs, internal exams, mocks, practicals, and departmental
+  tests.
 
 Submitted grades must not be silently overwritten. Corrections are requested,
-reviewed, approved or rejected, and kept auditable. Phase 6A does not mutate
-grade records automatically from correction requests.
+reviewed, approved or rejected, applied through a controlled service, and kept
+auditable. Applied corrections mark existing compilation runs stale; compiled
+snapshots are not rewritten in place.
 
 ## Event Safety
 
@@ -142,17 +147,59 @@ grade level, learning area, and rubric. `scope_unknown` remains conservative
 and requires review. A scoped CCT impact for an unrelated county, learning
 area, or non-grading app domain must not block unrelated readiness.
 
-Darasa does not yet have a separate Phase 6E moderation workflow model. Phase
-6D blocks on pending correction requests and keeps moderation statuses as
-readiness vocabulary for the next grading phase; once moderation records exist,
-pending moderation must be a computed blocker rather than a client override.
+## Phase 6E Corrections, Moderation, and School Schemas
+
+Phase 6E adds the backend correction and moderation workflow. Teachers may
+request a correction for assigned submitted records, but they cannot silently
+edit submitted marks and cannot approve their own correction. HOD approval is
+limited to assigned department or learning-area scope. If the HOD is inactive,
+unavailable, or the request must be escalated, a deputy or school academic
+administrator may review only through an explicit escalation with a reason.
+Timeout or HOD absence creates escalation eligibility, not automatic approval.
+
+Principal visibility is executive-only: correction counts, escalation status,
+readiness risk, and audit presence. Principals do not casually rewrite marks in
+Phase 6E. Parents see nothing in this phase.
+
+Every correction stores server-derived status, reviewer, applier, timestamps,
+reason code, old-state hash, changed-field list, and audit records. Audit
+records are reference-oriented and PII-minimized; raw marks, learner names,
+guardian data, private teacher notes, and raw grade grids must not be emitted
+in events, logs, or exception messages.
+
+Phase 6E also separates CBE/CCT grading context from school internal grading
+schemas. CBE/CCT remains curriculum truth: curriculum version, learning area,
+rubric foundation, competencies, and learning outcomes. A school grading schema
+is tenant-owned internal interpretation for CATs, internal exams, mocks, trial
+exams, departmental tests, and practical components. School schemas cannot
+override CBE/CCT binding.
+
+Internal schemas are tenant-scoped, versioned, auditable, band-based, and bound
+to an assessment when the assessment becomes operational. The assessment stores
+the schema version used. Schema changes do not mutate old marks, compiled
+history, or old assessment interpretations. Deprecated schemas cannot be bound
+to new assessments.
+
+Raw score, max score, normalized percentage, assessment type, CBE/CCT context,
+schema version, and derived internal band are distinct. A raw `12` in a CAT out
+of `15` normalizes to `80%`; a raw `12` in a CAT out of `30` normalizes to
+`40%`. Darasa must preserve that school-specific meaning without weakening the
+national CBE/CCT context.
+
+Readiness integrates corrections and schemas. Pending corrections, approved but
+unapplied corrections, missing schemas for schema-required internal
+assessments, deprecated schemas on new work, and stale compilations block
+report readiness. Rejected corrections do not block unless the underlying
+academic issue remains.
 
 ## Phase Boundaries
 
-Compilation is separate from readiness, and readiness is separate from report
-generation. Phase 6C compiles canonical facts. Phase 6D projects operational
-readiness over those facts. Report generation and PDFs belong to Phase 7. Safe
-NLP boundaries remain Phase 9 or later and cannot decide academic records.
+Compilation is separate from readiness, corrections, school schema mapping, and
+report generation. Phase 6C compiles canonical facts. Phase 6D projects
+operational readiness over those facts. Phase 6E controls post-submission mark
+corrections and tenant internal grading interpretation. Report generation and
+PDFs belong to Phase 7. Safe NLP boundaries remain Phase 9 or later and cannot
+decide academic records.
 
 NLP or generated text must never decide grades. Human academic records remain
 database-backed, auditable, tenant-scoped, and policy-controlled.
@@ -160,9 +207,10 @@ database-backed, auditable, tenant-scoped, and policy-controlled.
 ## Production Readiness Backlog
 
 `PRODUCTION_READINESS_BACKLOG.md` records grading work that remains before
-national production rollout. Phase 6D adds readiness dashboards / report-ready
-projections, but it is still not a report generator. Reports, PDFs, parent
+national production rollout. Phase 6E adds correction and internal-schema
+contracts, but it is still not a report generator. Reports, PDFs, parent
 analytics, and NLP remain later phases. Grading production blockers include
 large-roster performance profiling, stale compilation operations, correction
-workflow hardening, teacher workload stress testing, production step-up
-integration, audit expansion, and frontend retry/idempotency behavior.
+workflow operating procedures, audit retention, teacher workload stress
+testing, production step-up integration, and frontend retry/idempotency
+behavior.

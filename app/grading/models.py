@@ -58,6 +58,13 @@ class Assessment(TimeStampedModel):
         PRACTICAL = "practical", _("Practical")
         EXAM = "exam", _("Exam")
         PROJECT = "project", _("Project")
+        CAT = "cat", _("CAT")
+        INTERNAL_EXAM = "internal_exam", _("Internal exam")
+        MOCK_EXAM = "mock_exam", _("Mock exam")
+        TRIAL_EXAM = "trial_exam", _("Trial exam")
+        DEPARTMENTAL_TEST = "departmental_test", _("Departmental test")
+        PRACTICAL_COMPONENT = "practical_component", _("Practical component")
+        CBE_RUBRIC_ASSESSMENT = "cbe_rubric_assessment", _("CBE rubric assessment")
 
     class Status(models.TextChoices):
         DRAFT = "draft", _("Draft")
@@ -139,6 +146,14 @@ class Assessment(TimeStampedModel):
         related_name="created_assessments",
     )
     curriculum_binding_locked_at = models.DateTimeField(null=True, blank=True)
+    school_grading_schema = models.ForeignKey(
+        "grading.SchoolGradingSchema",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="assessments",
+    )
+    school_grading_schema_version = models.CharField(max_length=48, blank=True)
 
     class Meta(TimeStampedModel.Meta):
         indexes = [
@@ -179,6 +194,30 @@ class Assessment(TimeStampedModel):
                 )
         if self.opens_at and self.closes_at and self.opens_at >= self.closes_at:
             raise ValidationError({"closes_at": _("Close time must follow open time.")})
+        if self.school_grading_schema_id:
+            if self.school_grading_schema.tenant_id != self.tenant_id:
+                raise ValidationError(
+                    {"school_grading_schema": _("Grading schema tenant is invalid.")}
+                )
+            if self.school_grading_schema.assessment_type != self.assessment_type:
+                raise ValidationError(
+                    {"school_grading_schema": _("Grading schema type is invalid.")}
+                )
+            if self.school_grading_schema.status not in {
+                SchoolGradingSchema.Status.ACTIVE,
+                SchoolGradingSchema.Status.LOCKED,
+            }:
+                raise ValidationError(
+                    {"school_grading_schema": _("Grading schema is not active.")}
+                )
+            if self.assessment_type == self.AssessmentType.CBE_RUBRIC_ASSESSMENT:
+                raise ValidationError(
+                    {
+                        "school_grading_schema": _(
+                            "School grading schema cannot override CBE rubric context."
+                        )
+                    }
+                )
         self._validate_curriculum_binding_for_status()
         self._validate_curriculum_context_immutability()
 
@@ -308,7 +347,11 @@ class Assessment(TimeStampedModel):
             return []
         original = (
             Assessment.objects.filter(pk=self.pk)
-            .values("curriculum_version_id", "learning_area_id", "rubric_foundation_id")
+            .values(
+                "curriculum_version_id",
+                "learning_area_id",
+                "rubric_foundation_id",
+            )
             .first()
         )
         if original is None:
@@ -328,6 +371,166 @@ class Assessment(TimeStampedModel):
 
     def __str__(self) -> str:
         return f"Assessment {self.pk}"
+
+
+class SchoolGradingSchema(TimeStampedModel):
+    class Status(models.TextChoices):
+        DRAFT = "draft", _("Draft")
+        ACTIVE = "active", _("Active")
+        DEPRECATED = "deprecated", _("Deprecated")
+        RETIRED = "retired", _("Retired")
+        LOCKED = "locked", _("Locked")
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    tenant = models.ForeignKey(
+        School,
+        on_delete=models.CASCADE,
+        related_name="school_grading_schemas",
+    )
+    name = models.CharField(max_length=120)
+    assessment_type = models.CharField(
+        max_length=32,
+        choices=Assessment.AssessmentType.choices,
+    )
+    version_label = models.CharField(max_length=48)
+    status = models.CharField(
+        max_length=32,
+        choices=Status.choices,
+        default=Status.DRAFT,
+        db_index=True,
+    )
+    requires_full_coverage = models.BooleanField(default=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="created_school_grading_schemas",
+    )
+    activated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="activated_school_grading_schemas",
+    )
+    activated_at = models.DateTimeField(null=True, blank=True)
+    deprecated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="deprecated_school_grading_schemas",
+    )
+    deprecated_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta(TimeStampedModel.Meta):
+        constraints = [
+            models.UniqueConstraint(
+                fields=["tenant", "assessment_type", "version_label"],
+                name="grading_schema_type_version_unique",
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=["tenant", "assessment_type", "status"],
+                name="grading_schema_status_idx",
+            ),
+        ]
+
+    def clean(self) -> None:
+        super().clean()
+        self.name = self.name.strip()
+        self.version_label = self.version_label.strip()
+        if not self.name:
+            raise ValidationError({"name": _("Schema name is required.")})
+        if not self.version_label:
+            raise ValidationError({"version_label": _("Schema version is required.")})
+        if any(token in self.name.lower() for token in ["<script", "<svg", "onerror"]):
+            raise ValidationError({"name": _("Schema name is unsafe.")})
+        if self.status in {self.Status.ACTIVE, self.Status.LOCKED}:
+            if self.activated_by_id is None or self.activated_at is None:
+                raise ValidationError(
+                    {"activated_at": _("Active schema requires activation audit.")}
+                )
+
+    def save(self, *args: Any, **kwargs: Any) -> Any:
+        self.full_clean()
+        return super().save(*args, **kwargs)
+
+    def __str__(self) -> str:
+        return f"SchoolGradingSchema {self.pk}"
+
+
+class SchoolGradingBand(TimeStampedModel):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    tenant = models.ForeignKey(
+        School,
+        on_delete=models.CASCADE,
+        related_name="school_grading_bands",
+    )
+    schema = models.ForeignKey(
+        SchoolGradingSchema,
+        on_delete=models.CASCADE,
+        related_name="bands",
+    )
+    label = models.CharField(max_length=32)
+    descriptor = models.CharField(max_length=160, blank=True)
+    min_percentage = models.DecimalField(max_digits=5, decimal_places=2)
+    max_percentage = models.DecimalField(max_digits=5, decimal_places=2)
+    points = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        null=True,
+        blank=True,
+    )
+    order = models.PositiveIntegerField(default=1)
+
+    class Meta(TimeStampedModel.Meta):
+        constraints = [
+            models.UniqueConstraint(
+                fields=["tenant", "schema", "label"],
+                name="grading_schema_band_label_unique",
+            ),
+            models.CheckConstraint(
+                condition=Q(min_percentage__gte=0) & Q(max_percentage__lte=100),
+                name="grading_schema_band_pct_bounds",
+            ),
+            models.CheckConstraint(
+                condition=Q(min_percentage__lte=models.F("max_percentage")),
+                name="grading_schema_band_pct_order",
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=["tenant", "schema", "order"],
+                name="grading_schema_band_order_idx",
+            ),
+        ]
+
+    def clean(self) -> None:
+        super().clean()
+        self.label = self.label.strip()
+        self.descriptor = self.descriptor.strip()
+        if not self.label:
+            raise ValidationError({"label": _("Band label is required.")})
+        if (
+            self.tenant_id
+            and self.schema_id
+            and self.schema.tenant_id != self.tenant_id
+        ):
+            raise ValidationError({"tenant": _("Band tenant is invalid.")})
+        if any(token in self.label.lower() for token in ["<script", "<svg", "onerror"]):
+            raise ValidationError({"label": _("Band label is unsafe.")})
+        if self.min_percentage < 0 or self.max_percentage > 100:
+            raise ValidationError({"max_percentage": _("Band range is invalid.")})
+        if self.min_percentage > self.max_percentage:
+            raise ValidationError({"min_percentage": _("Band range is invalid.")})
+
+    def save(self, *args: Any, **kwargs: Any) -> Any:
+        self.full_clean()
+        return super().save(*args, **kwargs)
+
+    def __str__(self) -> str:
+        return f"SchoolGradingBand {self.pk}"
 
 
 class AssessmentComponent(TimeStampedModel):
@@ -762,6 +965,9 @@ class GradeRecord(TimeStampedModel):
     rubric_level = models.CharField(max_length=32, blank=True)
     component_scores = models.JSONField(default=dict, blank=True)
     remarks = models.TextField(blank=True)
+    school_grading_schema_version = models.CharField(max_length=48, blank=True)
+    internal_band_label = models.CharField(max_length=32, blank=True)
+    internal_band_descriptor = models.CharField(max_length=160, blank=True)
     version = models.PositiveIntegerField(default=1)
     submitted_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -843,10 +1049,30 @@ class GradeRecord(TimeStampedModel):
 
 class GradeCorrectionRequest(TimeStampedModel):
     class Status(models.TextChoices):
+        DRAFT = "draft", _("Draft")
         REQUESTED = "requested", _("Requested")
+        SUBMITTED = "submitted", _("Submitted")
+        UNDER_HOD_REVIEW = "under_hod_review", _("Under HOD review")
         APPROVED = "approved", _("Approved")
+        APPROVED_BY_HOD = "approved_by_hod", _("Approved by HOD")
         REJECTED = "rejected", _("Rejected")
+        REJECTED_BY_HOD = "rejected_by_hod", _("Rejected by HOD")
+        ESCALATION_REQUESTED = "escalation_requested", _("Escalation requested")
+        UNDER_ACADEMIC_HEAD_REVIEW = (
+            "under_academic_head_review",
+            _("Under academic head review"),
+        )
+        APPROVED_BY_ACADEMIC_HEAD = (
+            "approved_by_academic_head",
+            _("Approved by academic head"),
+        )
+        REJECTED_BY_ACADEMIC_HEAD = (
+            "rejected_by_academic_head",
+            _("Rejected by academic head"),
+        )
+        APPLIED = "applied", _("Applied")
         CANCELLED = "cancelled", _("Cancelled")
+        EXPIRED = "expired", _("Expired")
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     tenant = models.ForeignKey(
@@ -872,6 +1098,7 @@ class GradeCorrectionRequest(TimeStampedModel):
         related_name="reviewed_grade_corrections",
     )
     reason = models.TextField()
+    reason_code = models.CharField(max_length=64, default="teacher_request")
     old_state_hash = models.CharField(max_length=96)
     proposed_raw_score = models.DecimalField(
         max_digits=7,
@@ -879,7 +1106,24 @@ class GradeCorrectionRequest(TimeStampedModel):
         null=True,
         blank=True,
     )
+    proposed_component_scores = models.JSONField(default=dict, blank=True)
     proposed_remarks = models.TextField(blank=True)
+    review_reason = models.TextField(blank=True)
+    escalation_reason = models.TextField(blank=True)
+    escalated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="escalated_grade_corrections",
+    )
+    applied_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="applied_grade_corrections",
+    )
     status = models.CharField(
         max_length=32,
         choices=Status.choices,
@@ -888,6 +1132,8 @@ class GradeCorrectionRequest(TimeStampedModel):
     )
     requested_at = models.DateTimeField(default=timezone.now)
     reviewed_at = models.DateTimeField(null=True, blank=True)
+    escalated_at = models.DateTimeField(null=True, blank=True)
+    applied_at = models.DateTimeField(null=True, blank=True)
 
     class Meta(TimeStampedModel.Meta):
         indexes = [
@@ -905,6 +1151,13 @@ class GradeCorrectionRequest(TimeStampedModel):
                 raise ValidationError({"tenant": _("Correction tenant is invalid.")})
         if not self.reason.strip():
             raise ValidationError({"reason": _("Correction reason is required.")})
+        self.reason_code = self.reason_code.strip()
+        if not self.reason_code:
+            raise ValidationError({"reason_code": _("Reason code is required.")})
+        for field_name in ["reason", "review_reason", "escalation_reason"]:
+            value = getattr(self, field_name, "")
+            if any(token in value.lower() for token in ["<script", "<svg", "onerror"]):
+                raise ValidationError({field_name: _("Correction text is unsafe.")})
         if not self.old_state_hash.strip():
             raise ValidationError({"old_state_hash": _("Old state hash is required.")})
         if self.proposed_raw_score is not None:
@@ -914,6 +1167,12 @@ class GradeCorrectionRequest(TimeStampedModel):
             )
         if self.reviewed_by_id and self.reviewed_by_id == self.requested_by_id:
             raise ValidationError({"reviewed_by": _("Reviewer is invalid.")})
+        if self.applied_by_id and self.applied_by_id == self.requested_by_id:
+            raise ValidationError({"applied_by": _("Applier is invalid.")})
+        if not isinstance(self.proposed_component_scores, dict):
+            raise ValidationError(
+                {"proposed_component_scores": _("Component scores must be an object.")}
+            )
 
     def save(self, *args: Any, **kwargs: Any) -> Any:
         self.full_clean()
@@ -921,6 +1180,82 @@ class GradeCorrectionRequest(TimeStampedModel):
 
     def __str__(self) -> str:
         return f"GradeCorrectionRequest {self.pk}"
+
+
+class GradeCorrectionAuditRecord(TimeStampedModel):
+    class Action(models.TextChoices):
+        REQUESTED = "requested", _("Requested")
+        REVIEWED = "reviewed", _("Reviewed")
+        ESCALATED = "escalated", _("Escalated")
+        APPLIED = "applied", _("Applied")
+        CANCELLED = "cancelled", _("Cancelled")
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    tenant = models.ForeignKey(
+        School,
+        on_delete=models.CASCADE,
+        related_name="grade_correction_audit_records",
+    )
+    correction_request = models.ForeignKey(
+        GradeCorrectionRequest,
+        on_delete=models.PROTECT,
+        related_name="audit_records",
+    )
+    grade_record = models.ForeignKey(
+        GradeRecord,
+        on_delete=models.PROTECT,
+        related_name="correction_audit_records",
+    )
+    actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="grade_correction_audit_records",
+    )
+    action = models.CharField(max_length=32, choices=Action.choices, db_index=True)
+    status_from = models.CharField(max_length=32, blank=True)
+    status_to = models.CharField(max_length=32)
+    reason_code = models.CharField(max_length=64, blank=True)
+    reason_summary = models.CharField(max_length=180, blank=True)
+    state_before_hash = models.CharField(max_length=96, blank=True)
+    state_after_hash = models.CharField(max_length=96, blank=True)
+    changed_fields = models.JSONField(default=list, blank=True)
+
+    class Meta(TimeStampedModel.Meta):
+        indexes = [
+            models.Index(
+                fields=["tenant", "correction_request", "created_at"],
+                name="grading_corr_audit_req_idx",
+            ),
+            models.Index(
+                fields=["tenant", "grade_record", "created_at"],
+                name="grading_corr_audit_record_idx",
+            ),
+        ]
+
+    def clean(self) -> None:
+        super().clean()
+        related_tenants = [
+            getattr(self.correction_request, "tenant_id", None),
+            getattr(self.grade_record, "tenant_id", None),
+        ]
+        if self.tenant_id and any(value != self.tenant_id for value in related_tenants):
+            raise ValidationError({"tenant": _("Audit tenant is invalid.")})
+        if not isinstance(self.changed_fields, list):
+            raise ValidationError(
+                {"changed_fields": _("Changed fields must be a list.")}
+            )
+        if any(
+            token in self.reason_summary.lower()
+            for token in ["<script", "<svg", "onerror"]
+        ):
+            raise ValidationError({"reason_summary": _("Audit reason is unsafe.")})
+
+    def save(self, *args: Any, **kwargs: Any) -> Any:
+        self.full_clean()
+        return super().save(*args, **kwargs)
+
+    def __str__(self) -> str:
+        return f"GradeCorrectionAuditRecord {self.pk}"
 
 
 class CompilationRun(TimeStampedModel):

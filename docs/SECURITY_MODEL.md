@@ -154,6 +154,29 @@ Readiness must not mutate `Assessment`, `GradeRecord`, `GradeSubmissionBatch`,
 `CompilationRun`, compiled learner snapshots, or cohort summaries. It must not
 generate reports, PDFs, parent portal responses, or NLP text.
 
+Phase 6E treats submitted mark changes as a sensitive academic-record workflow.
+Teachers request corrections for assigned assessments; HODs review only within
+assigned learning-area scope; deputy/head-of-academics style roles may approve
+explicit escalations; principals receive executive correction summaries but do
+not casually edit marks. Teacher self-approval, inactive-role approval,
+cross-tenant approval, and `is_staff` bypasses fail closed.
+
+Correction services reject client-controlled status, reviewer, approver,
+applier, tenant, and old-state fields. Text reasons are stored as untrusted
+plaintext and reject executable HTML patterns. Audit records use state hashes,
+changed-field names, IDs, and reason codes instead of learner names or raw
+grade-grid payloads. Correction events are not emitted in Phase 6E; if future
+events are added, payloads must be reference-only and must exclude raw marks,
+old/new mark values, learner names, guardian data, private teacher notes, and
+report text.
+
+School internal grading schemas are tenant-scoped and versioned. They interpret
+school-specific CAT, internal exam, mock, trial, departmental, and practical
+score bands without changing CBE/CCT meaning. Schema binding is denied for CBE
+rubric assessments, cross-tenant schemas, deprecated schemas, and mismatched
+assessment types. Schema changes do not mutate historical grade records or
+compiled snapshots.
+
 After CCT fortification, grading and compilation consume CCT through explicit
 dependency guards. Future reports must consume compiled snapshots with their
 preserved curriculum context instead of re-resolving live curriculum truth.
