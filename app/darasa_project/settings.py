@@ -111,6 +111,61 @@ CORS_ALLOWED_ORIGINS = env.list("CORS_ALLOWED_ORIGINS", default=[])
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 AUTH_USER_MODEL = "core.CustomUser"
 
+JWT_ALGORITHM = "HS256"
+JWT_ALLOWED_ALGORITHMS = frozenset({"HS256"})
+JWT_MIN_HS_SECRET_LENGTH = 32
+JWT_INSECURE_SIGNING_KEYS = frozenset(
+    {
+        "",
+        "change-me",
+        "changeme",
+        "secret",
+        "insecure-dev-key-change-me",
+        "ci-secret-key-not-for-runtime-use",
+    }
+)
+
+
+def _get_jwt_signing_key(
+    *,
+    configured_key: str,
+    secret_key: str,
+    testing: bool,
+    algorithm: str,
+) -> str:
+    normalized_algorithm = str(algorithm or "").strip()
+    if (
+        not normalized_algorithm
+        or normalized_algorithm.lower() == "none"
+        or normalized_algorithm not in JWT_ALLOWED_ALGORITHMS
+    ):
+        raise ImproperlyConfigured("JWT algorithm is not allowed.")
+
+    configured_key = str(configured_key or "").strip()
+    if not configured_key:
+        if testing:
+            return secret_key
+        raise ImproperlyConfigured("JWT_SIGNING_KEY is required.")
+
+    if normalized_algorithm.startswith("HS") and not testing:
+        if (
+            len(configured_key) < JWT_MIN_HS_SECRET_LENGTH
+            or configured_key in JWT_INSECURE_SIGNING_KEYS
+        ):
+            raise ImproperlyConfigured(
+                "JWT_SIGNING_KEY must be a strong environment-provided secret."
+            )
+
+    return configured_key
+
+
+JWT_SIGNING_KEY = _get_jwt_signing_key(
+    configured_key=env("JWT_SIGNING_KEY", default=""),
+    secret_key=SECRET_KEY,
+    testing=TESTING,
+    algorithm=JWT_ALGORITHM,
+)
+
 TENANT_MODEL = "tenant.School"
 TENANT_DOMAIN_MODEL = "tenant.Domain"
 PUBLIC_SCHEMA_NAME = env("TENANT_PUBLIC_SCHEMA_NAME", default="public").strip()
@@ -297,9 +352,9 @@ SIMPLE_JWT = {
     "ROTATE_REFRESH_TOKENS": True,
     "BLACKLIST_AFTER_ROTATION": True,
     "UPDATE_LAST_LOGIN": True,
-    "ALGORITHM": "HS256",
+    "ALGORITHM": JWT_ALGORITHM,
     "AUTH_HEADER_TYPES": ("Bearer",),
-    "SIGNING_KEY": env("JWT_SIGNING_KEY", default=SECRET_KEY),
+    "SIGNING_KEY": JWT_SIGNING_KEY,
     "USER_ID_FIELD": "id",
     "USER_ID_CLAIM": "user_id",
 }

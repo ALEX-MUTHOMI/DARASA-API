@@ -102,11 +102,8 @@ jobs:
           poetry config virtualenvs.in-project true
           poetry install --no-interaction --no-root --with security
 
-      - name: Bandit static security scan
-        run: poetry run bandit -r app -c pyproject.toml
-
-      - name: pip-audit dependency scan
-        run: poetry run pip-audit
+      - name: Darasa centralized security gate
+        run: bash scripts/run-tests.sh security
 
   django-smoke:
     name: Django-Smoke

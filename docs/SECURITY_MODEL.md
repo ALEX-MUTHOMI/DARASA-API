@@ -61,6 +61,22 @@ irrelevant to curriculum authority.
 Production secrets must come from environment variables. Fernet configuration is
 validated at startup so encrypted-field behavior cannot silently degrade.
 
+JWT authentication is provided through SimpleJWT and PyJWT. Darasa pins the
+application contract to explicit `HS256` signing, rejects `none` or unexpected
+algorithms at settings validation time, and requires a strong
+environment-provided `JWT_SIGNING_KEY` outside tests. Access tokens are short
+lived, refresh-token rotation and blacklisting are enabled, and token claims
+must remain minimal. JWT role-like claims are not an authorization source of
+truth; privileged CCT, grading, correction, and tenant decisions must reload
+server-side user, tenant, role-binding, assignment, and policy state.
+
+Dependency audit remains mandatory. `PYSEC-2025-183` / `CVE-2025-45768` for
+PyJWT is the only current narrow exception because the advisory is disputed,
+has no fixed version, and concerns application-selected key strength. The
+exception must be reviewed before production release and during dependency
+update cycles; if a fixed PyJWT version becomes available, Darasa must remove
+the ignore and upgrade.
+
 Governance text rejects obvious learner-specific PII patterns. This keeps
 curriculum updates, regulatory notices, evidence cards, and acknowledgement
 notes from becoming accidental child-data stores.

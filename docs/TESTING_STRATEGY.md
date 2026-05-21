@@ -51,6 +51,16 @@ runs Django checks, migration checks, migrations, the default unit selection,
 lint, Bandit, `pip-audit`, compile checks, and diff whitespace checks. CI still
 runs Docker and compose checks separately.
 
+The CI security job must call the same centralized security policy as local
+closeout:
+
+```bash
+bash scripts/run-tests.sh security
+```
+
+Do not add raw `pip-audit` invocations in GitHub Actions unless they use the
+same exact policy from `scripts/run-tests.sh`.
+
 ### Deep Gate
 
 Command:
@@ -137,6 +147,11 @@ currently has no fixed version, and concerns application-selected JWT key
 strength. Darasa must continue enforcing strong JWT signing secrets through
 configuration and secret-management policy. Any other dependency advisory must
 fail the gate.
+
+Review the PyJWT exception before production release and during dependency
+update cycles. If a fixed PyJWT release becomes available, remove the ignore
+from `scripts/run-tests.sh`, update the lockfile, and rerun Full and Deep
+Gates.
 
 ## Performance Safety
 

@@ -36,6 +36,14 @@ run_manage() {
   (cd app && python manage.py "$@")
 }
 
+run_tool() {
+  if command -v poetry >/dev/null 2>&1; then
+    poetry run "$@"
+  else
+    "$@"
+  fi
+}
+
 run_optional_file() {
   local test_path="$1"
   shift
@@ -149,8 +157,8 @@ run_full() {
   run_manage migrate --noinput
   run_unit "$@"
   flake8 app
-  bandit -r app -c pyproject.toml
-  pip-audit "${PIP_AUDIT_IGNORE_ARGS[@]}"
+  run_tool bandit -r app -c pyproject.toml
+  run_tool pip-audit "${PIP_AUDIT_IGNORE_ARGS[@]}"
   python -m compileall app
   if command -v git >/dev/null 2>&1; then
     git diff --check
@@ -159,11 +167,17 @@ run_full() {
   fi
 }
 
+run_security() {
+  echo "Running Security Gate"
+  run_tool bandit -r app -c pyproject.toml
+  run_tool pip-audit "${PIP_AUDIT_IGNORE_ARGS[@]}"
+}
+
 run_deep() {
   echo "Running Deep Gate"
   run_pytest -m "redteam or security or performance or boundary" -q
-  bandit -r app -c pyproject.toml
-  pip-audit "${PIP_AUDIT_IGNORE_ARGS[@]}"
+  run_tool bandit -r app -c pyproject.toml
+  run_tool pip-audit "${PIP_AUDIT_IGNORE_ARGS[@]}"
   python -m compileall app
   if command -v rg >/dev/null 2>&1; then
     rg -n "requests\\.|httpx\\.|urllib\\.request|aiohttp|selenium|playwright" \
@@ -221,6 +235,9 @@ case "$MODE" in
     ;;
   deep)
     run_deep "$@"
+    ;;
+  security|audit)
+    run_security
     ;;
   changed)
     suggest_changed_gate

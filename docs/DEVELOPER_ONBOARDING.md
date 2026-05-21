@@ -49,14 +49,20 @@ Expected result is `No changes detected`.
 
 ## Security Checks
 
-Run lint, Bandit, dependency audit, and compile checks before opening a PR:
+Run lint, Bandit, dependency audit, and compile checks before opening a PR.
+Use the centralized security gate so local checks and GitHub Actions apply the
+same dependency-audit policy:
 
 ```bash
 docker compose run --rm django bash -c "cd /workspace && flake8 app"
-docker compose run --rm django bash -c "cd /workspace && bandit -r app -c pyproject.toml"
-docker compose run --rm django bash -c "cd /workspace && pip-audit"
+docker compose run --rm django bash -c "cd /workspace && bash scripts/run-tests.sh security"
 python -m compileall app
 ```
+
+`pip-audit` must fail on every vulnerability except the single documented
+PyJWT `PYSEC-2025-183` / `CVE-2025-45768` exception in `scripts/run-tests.sh`.
+That exception is temporary, disputed, and review-required; do not add broad
+dependency suppressions.
 
 ## CCT Development Rules
 
