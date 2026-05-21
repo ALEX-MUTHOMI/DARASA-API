@@ -93,6 +93,10 @@ audits and targeted drift scans. It should not run after every Codex edit.
   stabilizes; after implementation run `domain grading`; at closeout run Full
   Gate and Deep Gate because mark alteration, audit, schema interpretation, and
   PII boundaries are security-sensitive.
+- Phase 7A report snapshot / analytics change: during implementation run
+  focused Phase 7A tests and Patch Gate after the patch stabilizes; do not run
+  Full or Deep during normal implementation. At closeout, run Full Gate, and run
+  Deep Gate only when security-sensitive analytics boundaries changed.
 - Event contract change: run Patch Gate, then `domain events`.
 - Security-sensitive change: run the relevant Domain Gate; run Deep Gate if
   red-team or security behavior changed.

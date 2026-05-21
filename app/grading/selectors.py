@@ -15,6 +15,7 @@ from curriculum.models import (
     SchoolCurriculumAdoption,
 )
 from grading.models import (
+    AcademicAggregate,
     Assessment,
     AssessmentComponent,
     CompilationRun,
@@ -25,6 +26,9 @@ from grading.models import (
     GradeCorrectionAuditRecord,
     GradeRecord,
     GradeSubmissionBatch,
+    LearnerReportSnapshot,
+    ReportSnapshotRun,
+    ReportSubjectLineSnapshot,
     SchoolGradingBand,
     SchoolGradingSchema,
 )
@@ -764,6 +768,145 @@ def get_compiled_cohort_summary(
     if assessment is not None:
         queryset = queryset.filter(assessment=assessment)
     return queryset.order_by("-compiled_at", "assessment_id")
+
+
+def get_eligible_compilations_for_report_period(
+    *,
+    tenant: Any,
+    academic_year: Any,
+    term: Any,
+    cohort_id: Any | None = None,
+    learning_area_id: Any | None = None,
+) -> QuerySet[CompilationRun]:
+    if tenant is None or academic_year is None or term is None:
+        return CompilationRun.objects.none()
+    queryset = (
+        CompilationRun.objects.filter(
+            tenant=tenant,
+            assessment__academic_year=academic_year,
+            assessment__term=term,
+            status=CompilationRun.Status.COMPLETE,
+        )
+        .select_related(
+            "assessment",
+            "assessment__academic_year",
+            "assessment__term",
+            "assessment__cohort",
+            "assessment__learning_area",
+            "assessment__curriculum_version",
+            "assessment__rubric_foundation",
+            "assessment__school_grading_schema",
+        )
+        .prefetch_related("learner_snapshots")
+    )
+    if cohort_id is not None:
+        queryset = queryset.filter(assessment__cohort_id=cohort_id)
+    if learning_area_id is not None:
+        queryset = queryset.filter(assessment__learning_area_id=learning_area_id)
+    return queryset.order_by(
+        "assessment__cohort__name",
+        "assessment__learning_area__name",
+        "-compiled_at",
+        "-created_at",
+    )
+
+
+def get_learner_report_snapshots(
+    *,
+    tenant: Any,
+    snapshot_run: ReportSnapshotRun | None = None,
+    cohort_id: Any | None = None,
+    learner_id: Any | None = None,
+) -> QuerySet[LearnerReportSnapshot]:
+    if tenant is None:
+        return LearnerReportSnapshot.objects.none()
+    queryset = LearnerReportSnapshot.objects.filter(tenant=tenant).select_related(
+        "snapshot_run",
+        "student",
+        "academic_year",
+        "term",
+        "cohort",
+    )
+    if snapshot_run is not None:
+        queryset = queryset.filter(snapshot_run=snapshot_run)
+    if cohort_id is not None:
+        queryset = queryset.filter(cohort_id=cohort_id)
+    if learner_id is not None:
+        queryset = queryset.filter(student_id=learner_id)
+    return queryset.order_by("-average_percentage", "student_id")
+
+
+def get_report_subject_line_snapshots(
+    *,
+    tenant: Any,
+    snapshot_run: ReportSnapshotRun | None = None,
+    cohort_id: Any | None = None,
+    learning_area_id: Any | None = None,
+    actor: Any | None = None,
+) -> QuerySet[ReportSubjectLineSnapshot]:
+    if tenant is None:
+        return ReportSubjectLineSnapshot.objects.none()
+    queryset = ReportSubjectLineSnapshot.objects.filter(tenant=tenant).select_related(
+        "snapshot_run",
+        "assessment",
+        "student",
+        "cohort",
+        "learning_area",
+        "curriculum_version",
+        "rubric_foundation",
+    )
+    if snapshot_run is not None:
+        queryset = queryset.filter(snapshot_run=snapshot_run)
+    if cohort_id is not None:
+        queryset = queryset.filter(cohort_id=cohort_id)
+    if learning_area_id is not None:
+        queryset = queryset.filter(learning_area_id=learning_area_id)
+    if actor is not None:
+        queryset = queryset.filter(
+            assessment__cohort__teacher_assignments__teacher=actor,
+            assessment__cohort__teacher_assignments__learning_area=models.F(
+                "learning_area"
+            ),
+            assessment__cohort__teacher_assignments__academic_year=models.F(
+                "academic_year"
+            ),
+            assessment__cohort__teacher_assignments__term=models.F("term"),
+            assessment__cohort__teacher_assignments__is_active=True,
+        )
+    return queryset.distinct().order_by(
+        "cohort__name",
+        "learning_area__name",
+        "student_id",
+    )
+
+
+def get_academic_aggregates(
+    *,
+    tenant: Any,
+    snapshot_run: ReportSnapshotRun | None = None,
+    scope_type: str | None = None,
+    cohort_id: Any | None = None,
+    learning_area_id: Any | None = None,
+) -> QuerySet[AcademicAggregate]:
+    if tenant is None:
+        return AcademicAggregate.objects.none()
+    queryset = AcademicAggregate.objects.filter(tenant=tenant).select_related(
+        "snapshot_run",
+        "academic_year",
+        "term",
+        "cohort",
+        "learning_area",
+        "grade_level",
+    )
+    if snapshot_run is not None:
+        queryset = queryset.filter(snapshot_run=snapshot_run)
+    if scope_type is not None:
+        queryset = queryset.filter(scope_type=scope_type)
+    if cohort_id is not None:
+        queryset = queryset.filter(cohort_id=cohort_id)
+    if learning_area_id is not None:
+        queryset = queryset.filter(learning_area_id=learning_area_id)
+    return queryset.order_by("scope_type", "cohort__name", "learning_area__name")
 
 
 def get_teacher_compilation_scope(

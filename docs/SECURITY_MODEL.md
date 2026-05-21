@@ -196,3 +196,17 @@ compiled snapshots.
 After CCT fortification, grading and compilation consume CCT through explicit
 dependency guards. Future reports must consume compiled snapshots with their
 preserved curriculum context instead of re-resolving live curriculum truth.
+
+Phase 7A freezes approved report-ready facts into report snapshots and computes
+analytics from those snapshots and aggregate read models. Principal and deputy
+analytics must not expose raw grade grids. HOD analytics is learning-area
+scoped, class-teacher analytics is cohort scoped, and subject-teacher analytics
+is assignment scoped. Parent-safe analytics remains fail-closed until guardian
+links and approved report-release records exist.
+
+Report snapshots may contain learner-linked academic facts, so all access must
+remain tenant scoped and role scoped. Logs and events must not include raw
+marks, learner names, guardian data, teacher private notes, report text, NLP
+output, or raw grade grids. Aggregate projections include a minimum-group-size
+flag; production portals must suppress or blur tiny-group analytics where that
+flag is false.

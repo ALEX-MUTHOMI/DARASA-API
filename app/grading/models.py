@@ -1519,3 +1519,465 @@ class CompiledCohortSummary(TimeStampedModel):
     def save(self, *args: Any, **kwargs: Any) -> Any:
         self.full_clean()
         return super().save(*args, **kwargs)
+
+
+class ReportSnapshotRun(TimeStampedModel):
+    """A report-period freeze of readiness-cleared compiled facts."""
+
+    class Status(models.TextChoices):
+        PENDING = "pending", _("Pending")
+        RUNNING = "running", _("Running")
+        COMPLETE = "complete", _("Complete")
+        PARTIAL = "partial", _("Partial")
+        BLOCKED = "blocked", _("Blocked")
+        FAILED = "failed", _("Failed")
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    tenant = models.ForeignKey(
+        School,
+        on_delete=models.CASCADE,
+        related_name="report_snapshot_runs",
+    )
+    academic_year = models.ForeignKey(
+        AcademicYear,
+        on_delete=models.PROTECT,
+        related_name="report_snapshot_runs",
+    )
+    term = models.ForeignKey(
+        Term,
+        on_delete=models.PROTECT,
+        related_name="report_snapshot_runs",
+    )
+    requested_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="requested_report_snapshot_runs",
+    )
+    status = models.CharField(
+        max_length=32,
+        choices=Status.choices,
+        default=Status.PENDING,
+        db_index=True,
+    )
+    eligibility_summary = models.JSONField(default=dict, blank=True)
+    source_compilation_run_ids = models.JSONField(default=list, blank=True)
+    started_at = models.DateTimeField(default=timezone.now)
+    completed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta(TimeStampedModel.Meta):
+        indexes = [
+            models.Index(
+                fields=["tenant", "academic_year", "term", "status"],
+                name="grading_report_run_scope_idx",
+            ),
+        ]
+
+    def clean(self) -> None:
+        super().clean()
+        related_tenants = [
+            getattr(self.academic_year, "tenant_id", None),
+            getattr(self.term, "tenant_id", None),
+        ]
+        if self.tenant_id and any(value != self.tenant_id for value in related_tenants):
+            raise ValidationError({"tenant": _("Report run tenant is invalid.")})
+        if self.term_id and self.academic_year_id:
+            if self.term.academic_year_id != self.academic_year_id:
+                raise ValidationError({"term": _("Report run term is invalid.")})
+        if not isinstance(self.eligibility_summary, dict):
+            raise ValidationError(
+                {"eligibility_summary": _("Eligibility summary must be an object.")}
+            )
+        if not isinstance(self.source_compilation_run_ids, list):
+            raise ValidationError(
+                {"source_compilation_run_ids": _("Compilation ids must be a list.")}
+            )
+
+    def save(self, *args: Any, **kwargs: Any) -> Any:
+        self.full_clean()
+        return super().save(*args, **kwargs)
+
+    def __str__(self) -> str:
+        return f"ReportSnapshotRun {self.pk}"
+
+
+class ReportEligibilityRecord(TimeStampedModel):
+    """Assessment-level gate result before report snapshots are frozen."""
+
+    class Status(models.TextChoices):
+        ELIGIBLE = "eligible", _("Eligible")
+        BLOCKED = "blocked", _("Blocked")
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    tenant = models.ForeignKey(
+        School,
+        on_delete=models.CASCADE,
+        related_name="report_eligibility_records",
+    )
+    snapshot_run = models.ForeignKey(
+        ReportSnapshotRun,
+        on_delete=models.CASCADE,
+        related_name="eligibility_records",
+    )
+    assessment = models.ForeignKey(
+        Assessment,
+        on_delete=models.PROTECT,
+        related_name="report_eligibility_records",
+    )
+    compilation_run = models.ForeignKey(
+        CompilationRun,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="report_eligibility_records",
+    )
+    academic_year = models.ForeignKey(AcademicYear, on_delete=models.PROTECT)
+    term = models.ForeignKey(Term, on_delete=models.PROTECT)
+    cohort = models.ForeignKey(Cohort, on_delete=models.PROTECT)
+    learning_area = models.ForeignKey(LearningArea, on_delete=models.PROTECT)
+    status = models.CharField(max_length=32, choices=Status.choices, db_index=True)
+    readiness_status = models.CharField(max_length=64, blank=True)
+    blocker_codes = models.JSONField(default=list, blank=True)
+    source_readiness = models.JSONField(default=dict, blank=True)
+    checked_at = models.DateTimeField(default=timezone.now)
+
+    class Meta(TimeStampedModel.Meta):
+        indexes = [
+            models.Index(
+                fields=["tenant", "snapshot_run", "status"],
+                name="grading_report_elig_run_idx",
+            ),
+            models.Index(
+                fields=["tenant", "assessment", "status"],
+                name="grading_report_elig_assess_idx",
+            ),
+        ]
+
+    def clean(self) -> None:
+        super().clean()
+        related_tenants = [
+            getattr(self.snapshot_run, "tenant_id", None),
+            getattr(self.assessment, "tenant_id", None),
+            getattr(self.compilation_run, "tenant_id", None)
+            if self.compilation_run_id
+            else self.tenant_id,
+            getattr(self.academic_year, "tenant_id", None),
+            getattr(self.term, "tenant_id", None),
+            getattr(self.cohort, "tenant_id", None),
+            getattr(self.learning_area, "tenant_id", None),
+        ]
+        if self.tenant_id and any(value != self.tenant_id for value in related_tenants):
+            raise ValidationError({"tenant": _("Eligibility tenant is invalid.")})
+        if not isinstance(self.blocker_codes, list):
+            raise ValidationError({"blocker_codes": _("Blockers must be a list.")})
+        if not isinstance(self.source_readiness, dict):
+            raise ValidationError(
+                {"source_readiness": _("Readiness payload must be an object.")}
+            )
+
+    def save(self, *args: Any, **kwargs: Any) -> Any:
+        self.full_clean()
+        return super().save(*args, **kwargs)
+
+    def __str__(self) -> str:
+        return f"ReportEligibilityRecord {self.pk}"
+
+
+class LearnerReportSnapshot(TimeStampedModel):
+    """Learner report-period facts frozen for later rendering."""
+
+    class Status(models.TextChoices):
+        ACTIVE = "active", _("Active")
+        SUPERSEDED = "superseded", _("Superseded")
+        STALE = "stale", _("Stale")
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    tenant = models.ForeignKey(
+        School,
+        on_delete=models.CASCADE,
+        related_name="learner_report_snapshots",
+    )
+    snapshot_run = models.ForeignKey(
+        ReportSnapshotRun,
+        on_delete=models.CASCADE,
+        related_name="learner_snapshots",
+    )
+    student = models.ForeignKey(
+        Student,
+        on_delete=models.PROTECT,
+        related_name="report_snapshots",
+    )
+    academic_year = models.ForeignKey(AcademicYear, on_delete=models.PROTECT)
+    term = models.ForeignKey(Term, on_delete=models.PROTECT)
+    cohort = models.ForeignKey(Cohort, on_delete=models.PROTECT)
+    status = models.CharField(
+        max_length=32,
+        choices=Status.choices,
+        default=Status.ACTIVE,
+        db_index=True,
+    )
+    subject_count = models.PositiveIntegerField(default=0)
+    total_score = models.DecimalField(
+        max_digits=9,
+        decimal_places=2,
+        default=Decimal("0.00"),
+    )
+    average_percentage = models.DecimalField(
+        max_digits=7,
+        decimal_places=2,
+        default=Decimal("0.00"),
+    )
+    source_compilation_run_ids = models.JSONField(default=list, blank=True)
+    readiness_status = models.CharField(max_length=64, blank=True)
+    correction_audit_state = models.JSONField(default=dict, blank=True)
+    context_snapshot = models.JSONField(default=dict, blank=True)
+    schema_versions = models.JSONField(default=dict, blank=True)
+
+    class Meta(TimeStampedModel.Meta):
+        constraints = [
+            models.UniqueConstraint(
+                fields=["tenant", "snapshot_run", "student"],
+                name="grading_learner_report_unique",
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=["tenant", "snapshot_run", "cohort", "status"],
+                name="grading_lrn_report_scope_idx",
+            ),
+            models.Index(
+                fields=["tenant", "student", "academic_year", "term"],
+                name="grading_lrn_report_stud_idx",
+            ),
+        ]
+
+    def clean(self) -> None:
+        super().clean()
+        related_tenants = [
+            getattr(self.snapshot_run, "tenant_id", None),
+            getattr(self.student, "tenant_id", None),
+            getattr(self.academic_year, "tenant_id", None),
+            getattr(self.term, "tenant_id", None),
+            getattr(self.cohort, "tenant_id", None),
+        ]
+        if self.tenant_id and any(value != self.tenant_id for value in related_tenants):
+            raise ValidationError({"tenant": _("Learner report tenant is invalid.")})
+        for field_name in [
+            "source_compilation_run_ids",
+        ]:
+            if not isinstance(getattr(self, field_name), list):
+                raise ValidationError({field_name: _("Value must be a list.")})
+        for field_name in [
+            "correction_audit_state",
+            "context_snapshot",
+            "schema_versions",
+        ]:
+            if not isinstance(getattr(self, field_name), dict):
+                raise ValidationError({field_name: _("Value must be an object.")})
+
+    def save(self, *args: Any, **kwargs: Any) -> Any:
+        self.full_clean()
+        return super().save(*args, **kwargs)
+
+    def __str__(self) -> str:
+        return f"LearnerReportSnapshot {self.pk}"
+
+
+class ReportSubjectLineSnapshot(TimeStampedModel):
+    """Subject line facts for a learner report snapshot."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    tenant = models.ForeignKey(
+        School,
+        on_delete=models.CASCADE,
+        related_name="report_subject_line_snapshots",
+    )
+    snapshot_run = models.ForeignKey(
+        ReportSnapshotRun,
+        on_delete=models.CASCADE,
+        related_name="subject_line_snapshots",
+    )
+    learner_snapshot = models.ForeignKey(
+        LearnerReportSnapshot,
+        on_delete=models.CASCADE,
+        related_name="subject_lines",
+    )
+    compiled_learner_snapshot = models.ForeignKey(
+        CompiledLearnerSnapshot,
+        on_delete=models.PROTECT,
+        related_name="report_subject_lines",
+    )
+    compilation_run = models.ForeignKey(CompilationRun, on_delete=models.PROTECT)
+    assessment = models.ForeignKey(Assessment, on_delete=models.PROTECT)
+    student = models.ForeignKey(Student, on_delete=models.PROTECT)
+    academic_year = models.ForeignKey(AcademicYear, on_delete=models.PROTECT)
+    term = models.ForeignKey(Term, on_delete=models.PROTECT)
+    cohort = models.ForeignKey(Cohort, on_delete=models.PROTECT)
+    learning_area = models.ForeignKey(LearningArea, on_delete=models.PROTECT)
+    curriculum_version = models.ForeignKey(
+        "curriculum.CurriculumVersion",
+        on_delete=models.PROTECT,
+    )
+    rubric_foundation = models.ForeignKey(
+        "curriculum.AssessmentRubricFoundation",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+    )
+    school_grading_schema_version = models.CharField(max_length=48, blank=True)
+    score_summary = models.JSONField(default=dict, blank=True)
+    component_summary = models.JSONField(default=dict, blank=True)
+    cbe_band_status = models.CharField(max_length=64, blank=True)
+    internal_band_label = models.CharField(max_length=32, blank=True)
+    internal_band_descriptor = models.CharField(max_length=160, blank=True)
+    status = models.CharField(max_length=32, db_index=True)
+
+    class Meta(TimeStampedModel.Meta):
+        constraints = [
+            models.UniqueConstraint(
+                fields=["tenant", "snapshot_run", "assessment", "student"],
+                name="grading_report_subject_unique",
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=["tenant", "snapshot_run", "cohort", "learning_area"],
+                name="grading_rpt_subj_scope_idx",
+            ),
+            models.Index(
+                fields=["tenant", "learning_area", "status"],
+                name="grading_rpt_subj_area_idx",
+            ),
+        ]
+
+    def clean(self) -> None:
+        super().clean()
+        related_tenants = [
+            getattr(self.snapshot_run, "tenant_id", None),
+            getattr(self.learner_snapshot, "tenant_id", None),
+            getattr(self.compiled_learner_snapshot, "tenant_id", None),
+            getattr(self.compilation_run, "tenant_id", None),
+            getattr(self.assessment, "tenant_id", None),
+            getattr(self.student, "tenant_id", None),
+            getattr(self.academic_year, "tenant_id", None),
+            getattr(self.term, "tenant_id", None),
+            getattr(self.cohort, "tenant_id", None),
+            getattr(self.learning_area, "tenant_id", None),
+        ]
+        if self.tenant_id and any(value != self.tenant_id for value in related_tenants):
+            raise ValidationError({"tenant": _("Subject report tenant is invalid.")})
+        if self.assessment_id and self.learning_area_id:
+            if self.assessment.learning_area_id != self.learning_area_id:
+                raise ValidationError(
+                    {"learning_area": _("Subject report scope is invalid.")}
+                )
+        if not isinstance(self.score_summary, dict):
+            raise ValidationError({"score_summary": _("Score summary must be object.")})
+        if not isinstance(self.component_summary, dict):
+            raise ValidationError(
+                {"component_summary": _("Component summary must be object.")}
+            )
+
+    def save(self, *args: Any, **kwargs: Any) -> Any:
+        self.full_clean()
+        return super().save(*args, **kwargs)
+
+    def __str__(self) -> str:
+        return f"ReportSubjectLineSnapshot {self.pk}"
+
+
+class AcademicAggregate(TimeStampedModel):
+    """Precomputed report-period analytics read model."""
+
+    class ScopeType(models.TextChoices):
+        SCHOOL = "school", _("School")
+        COHORT = "cohort", _("Cohort")
+        STREAM = "stream", _("Stream")
+        SUBJECT = "subject", _("Subject")
+        DEPARTMENT = "department", _("Department")
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    tenant = models.ForeignKey(
+        School,
+        on_delete=models.CASCADE,
+        related_name="academic_aggregates",
+    )
+    snapshot_run = models.ForeignKey(
+        ReportSnapshotRun,
+        on_delete=models.CASCADE,
+        related_name="academic_aggregates",
+    )
+    academic_year = models.ForeignKey(AcademicYear, on_delete=models.PROTECT)
+    term = models.ForeignKey(Term, on_delete=models.PROTECT)
+    scope_type = models.CharField(
+        max_length=32,
+        choices=ScopeType.choices,
+        db_index=True,
+    )
+    grade_level = models.ForeignKey(
+        GradeLevel,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+    )
+    cohort = models.ForeignKey(
+        Cohort,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+    )
+    learning_area = models.ForeignKey(
+        LearningArea,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+    )
+    stream_label = models.CharField(max_length=64, blank=True)
+    department_key = models.CharField(max_length=96, blank=True)
+    metrics = models.JSONField(default=dict, blank=True)
+    min_group_size_met = models.BooleanField(default=True)
+    status = models.CharField(max_length=32, default="computed", db_index=True)
+
+    class Meta(TimeStampedModel.Meta):
+        indexes = [
+            models.Index(
+                fields=["tenant", "snapshot_run", "scope_type", "status"],
+                name="grading_acad_agg_run_idx",
+            ),
+            models.Index(
+                fields=["tenant", "academic_year", "term", "scope_type"],
+                name="grading_acad_agg_period_idx",
+            ),
+            models.Index(
+                fields=["tenant", "cohort", "learning_area"],
+                name="grading_acad_agg_scope_idx",
+            ),
+        ]
+
+    def clean(self) -> None:
+        super().clean()
+        related_tenants = [
+            getattr(self.snapshot_run, "tenant_id", None),
+            getattr(self.academic_year, "tenant_id", None),
+            getattr(self.term, "tenant_id", None),
+            (
+                getattr(self.cohort, "tenant_id", None)
+                if self.cohort_id
+                else self.tenant_id
+            ),
+            getattr(self.learning_area, "tenant_id", None)
+            if self.learning_area_id
+            else self.tenant_id,
+        ]
+        if self.tenant_id and any(value != self.tenant_id for value in related_tenants):
+            raise ValidationError({"tenant": _("Aggregate tenant is invalid.")})
+        if not isinstance(self.metrics, dict):
+            raise ValidationError({"metrics": _("Metrics must be an object.")})
+
+    def save(self, *args: Any, **kwargs: Any) -> Any:
+        self.full_clean()
+        return super().save(*args, **kwargs)
+
+    def __str__(self) -> str:
+        return f"AcademicAggregate {self.pk}"

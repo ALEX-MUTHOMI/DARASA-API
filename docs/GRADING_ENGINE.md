@@ -192,14 +192,44 @@ assessments, deprecated schemas on new work, and stale compilations block
 report readiness. Rejected corrections do not block unless the underlying
 academic issue remains.
 
+## Phase 7A Report Snapshots and Analytics Foundation
+
+Phase 7A creates the report truth layer before report rendering. It freezes
+readiness-cleared compiled facts into `ReportSnapshotRun`,
+`LearnerReportSnapshot`, and `ReportSubjectLineSnapshot` records, then computes
+tenant/report-period-scoped `AcademicAggregate` rows for school, cohort,
+stream, subject, and department analytics.
+
+Report snapshots are not PDFs, report cards, frontend dashboards, parent
+portal payloads, or NLP text. They preserve source compilation references,
+readiness status, correction-audit state, CBE/CCT curriculum version, rubric
+foundation, assessment context, academic year, term, and school grading schema
+version. Later CCT changes, school schema changes, or corrections must not
+silently rewrite existing snapshots; a later workflow should create a new run
+or mark old snapshots stale/superseded.
+
+Analytics projections read report snapshots and precomputed aggregates, not
+unstable live `GradeRecord` rows. Principal and deputy projections are tenant
+scoped and executive/operations shaped. HOD projections are learning-area
+scoped. Class-teacher projections are cohort scoped. Subject-teacher
+projections are assignment scoped. Future parent analytics remains fail-closed
+until guardian links and approved report-release records exist.
+
+Aggregates include a minimum-group-size flag so future portals can avoid
+overexposing individual learner performance through tiny groups. Phase 7A keeps
+PDF rendering, final report formatting, parent analytics, and NLP in future
+phases.
+
 ## Phase Boundaries
 
-Compilation is separate from readiness, corrections, school schema mapping, and
-report generation. Phase 6C compiles canonical facts. Phase 6D projects
-operational readiness over those facts. Phase 6E controls post-submission mark
-corrections and tenant internal grading interpretation. Report generation and
-PDFs belong to Phase 7. Safe NLP boundaries remain Phase 9 or later and cannot
-decide academic records.
+Compilation is separate from readiness, corrections, school schema mapping,
+report snapshots, analytics, and report rendering. Phase 6C compiles canonical
+facts. Phase 6D projects operational readiness over those facts. Phase 6E
+controls post-submission mark corrections and tenant internal grading
+interpretation. Phase 7A freezes approved facts and computes analytics read
+models. Final report rendering, PDFs, parent portal delivery, and NLP remain
+later phases. Safe NLP boundaries remain Phase 9 or later and cannot decide
+academic records.
 
 NLP or generated text must never decide grades. Human academic records remain
 database-backed, auditable, tenant-scoped, and policy-controlled.

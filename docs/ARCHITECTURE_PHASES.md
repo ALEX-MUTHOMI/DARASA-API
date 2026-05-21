@@ -114,6 +114,16 @@ internal schemas interpret CATs, internal exams, mocks, trial exams,
 departmental tests, and practical components per tenant and version, but they
 cannot override CBE/CCT curriculum truth.
 
+Phase 7A adds the report snapshot and academic analytics foundation inside the
+grading domain. It does not render reports. It freezes readiness-cleared
+compiled facts into tenant/report-period-scoped report snapshots, preserves
+CBE/CCT and school schema context, records eligibility blockers, and computes
+precomputed school, cohort, stream, subject, and department aggregates for
+role-aware analytics. Principal, deputy, HOD, class-teacher, and
+subject-teacher projections consume those frozen facts and aggregate read
+models. Future parent analytics remains fail-closed until guardian links and
+approved release models exist.
+
 The production-readiness backlog in `PRODUCTION_READINESS_BACKLOG.md` is the
 canonical list of remaining platform, security, observability, operations, CCT,
 grading, and governance work. CCT is application-architecture stable; CCT
@@ -121,7 +131,7 @@ public uploads and Darasa-Core as a whole are not production-ready yet.
 
 ## Active Boundary Rules
 
-The default unit test command includes Phase 1 through Phase 6E work and
+The default unit test command includes Phase 1 through Phase 7A work and
 continues to exclude future markers, integration-heavy tests, and chaos tests.
 Darasa also has explicit test gates: Patch/Turbo for fast feedback, Domain for
 changed-domain verification, Full for phase closeout, and Deep for
@@ -129,9 +139,9 @@ security/red-team/performance sweeps. Patch/Turbo is not a merge or release
 gate; Full remains the authoritative source of truth.
 
 The grading app is intentionally active for Phase 6A and later. Future report,
-scheme, lesson-assistant, external broker, crawler, and AI-parser work remains
-inactive until its own phase creates intentional migrations, policies, and
-tests.
+PDF rendering, parent portal, NLP, lesson-assistant, external broker, crawler,
+and AI-parser work remains inactive until its own phase creates intentional
+migrations, policies, and tests.
 
 CCT never fetches live government sites. It validates source metadata and stores
 evidence so a future ingestion layer can be reviewed separately.
@@ -152,3 +162,8 @@ Submitted marks are academic records. Phase 6E corrections may update
 `GradeRecord` only after approved workflow and audit. They must not mutate CBE
 bindings or compiled snapshots, and they must not generate reports, PDFs,
 parent analytics, or NLP text.
+
+Report snapshots are derived records. Phase 7A may create new snapshot and
+aggregate rows after readiness/correction/CCT/schema gates pass, but it must
+not mutate `GradeRecord`, `GradeSubmissionBatch`, `CompilationRun`, compiled
+snapshots, correction audit records, or CCT state.

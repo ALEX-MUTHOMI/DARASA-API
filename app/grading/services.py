@@ -45,9 +45,22 @@ from grading.algorithms.hod_escalation_rules import can_escalate_hod_unavailable
 from grading.algorithms.learner_snapshot_builder import build_learner_snapshots
 from grading.algorithms.missing_marks import detect_missing_marks
 from grading.algorithms.pii_safe_correction_payload import sanitize_untrusted_text
+from grading.algorithms.academic_aggregate_builder import build_scope_aggregate
 from grading.algorithms.readiness_blockers import blocker
+from grading.algorithms.report_eligibility_rules import (
+    evaluate_report_eligibility,
+    summarize_eligibility,
+)
 from grading.algorithms.report_readiness_rules import build_report_readiness_summary
+from grading.algorithms.report_snapshot_builder import (
+    build_learner_snapshot_payload,
+    build_subject_line_payload,
+)
 from grading.algorithms.role_projection_builder import build_role_projection
+from grading.algorithms.role_analytics_projection import (
+    build_future_parent_snapshot_projection,
+    build_role_analytics_projection,
+)
 from grading.algorithms.role_readiness_projection import (
     build_future_parent_readiness_projection,
     build_readiness_projection,
@@ -68,6 +81,7 @@ from grading.algorithms.workload_resolver import build_work_item
 from grading.models import (
     Assessment,
     AssessmentComponent,
+    AcademicAggregate,
     CompilationRun,
     CompiledAssessmentSnapshot,
     CompiledCohortSummary,
@@ -78,12 +92,17 @@ from grading.models import (
     GradeCorrectionRequest,
     GradeRecord,
     GradeSubmissionBatch,
+    LearnerReportSnapshot,
+    ReportEligibilityRecord,
+    ReportSnapshotRun,
+    ReportSubjectLineSnapshot,
     SchoolGradingBand,
     SchoolGradingSchema,
 )
 from grading.policies import (
     can_apply_correction,
     can_compile_assessment,
+    can_compute_report_snapshot,
     can_compute_readiness,
     can_escalate_correction,
     can_manage_school_grading_schema,
@@ -95,15 +114,22 @@ from grading.policies import (
     can_view_deputy_academics_compilation,
     can_view_future_parent_readiness,
     can_view_future_parent_projection,
+    can_view_class_teacher_analytics,
+    can_view_deputy_analytics,
+    can_view_future_parent_snapshot,
     can_view_hod_compilation,
+    can_view_hod_analytics,
     can_view_hod_readiness,
     can_view_principal_correction_summary,
     can_view_principal_compilation,
+    can_view_principal_analytics,
     can_view_principal_readiness,
+    can_view_subject_teacher_analytics,
     can_view_teacher_compilation,
     can_view_teacher_readiness,
 )
 from grading.selectors import (
+    get_academic_aggregates,
     get_academic_head_readiness_scope,
     get_assessment_for_teacher,
     get_assessment_components_for_compilation,
@@ -112,9 +138,11 @@ from grading.selectors import (
     get_cct_blockers_for_assessment,
     get_compiled_learner_snapshots,
     get_hod_readiness_scope,
+    get_learner_report_snapshots,
     get_latest_compilation_for_assessment,
     get_pending_corrections_for_assessment,
     get_principal_readiness_scope,
+    get_report_subject_line_snapshots,
     get_readiness_batches_for_assessment,
     get_readiness_drafts_for_assessment,
     get_expected_roster_for_compilation,
@@ -2076,3 +2104,682 @@ def get_future_parent_learner_projection(
         cohort_summaries=[],
         learner_snapshots=snapshots,
     )
+
+
+def compute_report_eligibility(
+    *,
+    actor: Any,
+    tenant: Any,
+    academic_year: Any,
+    term: Any,
+    filters: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    context = _policy_context(
+        actor=actor,
+        tenant=tenant,
+        action="grading.report_snapshot.compute",
+        role_codes=GRADING_ACADEMIC_HEAD_ROLE_CODES
+        | {Role.RoleCode.PRINCIPAL.value},
+    )
+    if not can_compute_report_snapshot(context, tenant=tenant):
+        raise ValidationError({"report_snapshot": "Report snapshot is not authorized."})
+    assessments = list(
+        get_academic_head_readiness_scope(
+            tenant=tenant,
+            filters={
+                "academic_year_id": getattr(academic_year, "id", academic_year),
+                "term_id": getattr(term, "id", term),
+                **(filters or {}),
+            },
+        )
+    )
+    results = []
+    for assessment in assessments:
+        readiness = _build_assessment_readiness(tenant=tenant, assessment=assessment)
+        results.append(evaluate_report_eligibility(readiness))
+    return summarize_eligibility(results) | {"results": results}
+
+
+def _create_eligibility_records(
+    *,
+    tenant: Any,
+    snapshot_run: ReportSnapshotRun,
+    assessments: list[Assessment],
+) -> list[dict[str, Any]]:
+    results = []
+    for assessment in assessments:
+        readiness = _build_assessment_readiness(tenant=tenant, assessment=assessment)
+        result = evaluate_report_eligibility(readiness)
+        run_id = result["compilation_run_id"]
+        compilation_run = (
+            CompilationRun.objects.filter(tenant=tenant, id=run_id).first()
+            if run_id
+            else None
+        )
+        ReportEligibilityRecord.objects.create(
+            tenant=tenant,
+            snapshot_run=snapshot_run,
+            assessment=assessment,
+            compilation_run=compilation_run,
+            academic_year=assessment.academic_year,
+            term=assessment.term,
+            cohort=assessment.cohort,
+            learning_area=assessment.learning_area,
+            status=result["status"],
+            readiness_status=result["readiness_status"],
+            blocker_codes=result["blocker_codes"],
+            source_readiness=readiness,
+        )
+        results.append(result)
+    return results
+
+
+def _eligible_compilation_ids(results: list[dict[str, Any]]) -> set[str]:
+    return {
+        result["compilation_run_id"]
+        for result in results
+        if result.get("eligible") and result.get("compilation_run_id")
+    }
+
+
+def _snapshot_source_rows(
+    *,
+    tenant: Any,
+    compilation_run_ids: set[str],
+) -> list[CompiledLearnerSnapshot]:
+    if not compilation_run_ids:
+        return []
+    return list(
+        CompiledLearnerSnapshot.objects.filter(
+            tenant=tenant,
+            compilation_run_id__in=compilation_run_ids,
+            status=CompilationRun.Status.COMPLETE,
+        )
+        .select_related(
+            "assessment",
+            "student",
+            "cohort",
+            "learning_area",
+            "curriculum_version",
+            "rubric_foundation",
+            "compilation_run",
+        )
+        .order_by("student_id", "learning_area__name", "assessment_id")
+    )
+
+
+def _build_report_snapshots(
+    *,
+    tenant: Any,
+    snapshot_run: ReportSnapshotRun,
+    source_rows: list[CompiledLearnerSnapshot],
+) -> None:
+    lines_by_student: dict[str, list[dict[str, Any]]] = {}
+    rows_by_student: dict[str, list[CompiledLearnerSnapshot]] = {}
+    for row in source_rows:
+        line = build_subject_line_payload(compiled_snapshot=row)
+        lines_by_student.setdefault(str(row.student_id), []).append(line)
+        rows_by_student.setdefault(str(row.student_id), []).append(row)
+
+    learner_by_student: dict[str, LearnerReportSnapshot] = {}
+    for student_id, lines in sorted(lines_by_student.items()):
+        row = rows_by_student[student_id][0]
+        payload = build_learner_snapshot_payload(
+            student_id=student_id,
+            subject_lines=lines,
+            readiness_status="ready_for_reports",
+        )
+        learner_by_student[student_id] = LearnerReportSnapshot.objects.create(
+            tenant=tenant,
+            snapshot_run=snapshot_run,
+            student_id=student_id,
+            academic_year=row.assessment.academic_year,
+            term=row.assessment.term,
+            cohort=row.cohort,
+            subject_count=payload["subject_count"],
+            total_score=Decimal(payload["total_score"]),
+            average_percentage=Decimal(payload["average_percentage"]),
+            source_compilation_run_ids=payload["source_compilation_run_ids"],
+            readiness_status=payload["readiness_status"],
+            correction_audit_state=payload["correction_audit_state"],
+            context_snapshot=payload["context_snapshot"],
+            schema_versions=payload["schema_versions"],
+        )
+
+    for row in source_rows:
+        line = build_subject_line_payload(compiled_snapshot=row)
+        ReportSubjectLineSnapshot.objects.create(
+            tenant=tenant,
+            snapshot_run=snapshot_run,
+            learner_snapshot=learner_by_student[str(row.student_id)],
+            compiled_learner_snapshot=row,
+            compilation_run=row.compilation_run,
+            assessment=row.assessment,
+            student=row.student,
+            academic_year=row.assessment.academic_year,
+            term=row.assessment.term,
+            cohort=row.cohort,
+            learning_area=row.learning_area,
+            curriculum_version=row.curriculum_version,
+            rubric_foundation=row.rubric_foundation,
+            school_grading_schema_version=line["school_grading_schema_version"],
+            score_summary=line["score_summary"],
+            component_summary=line["component_summary"],
+            cbe_band_status=line["cbe_band_status"],
+            internal_band_label=line["internal_band_label"],
+            internal_band_descriptor=line["internal_band_descriptor"],
+            status=line["status"],
+        )
+
+
+def _percentages(items: list[Any]) -> list[str]:
+    return [str(getattr(item, "average_percentage", "0.00")) for item in items]
+
+
+def _subject_percentages(items: list[Any]) -> list[str]:
+    return [
+        str((item.score_summary or {}).get("percentage", "0.00"))
+        for item in items
+    ]
+
+
+def _create_aggregate(
+    *,
+    tenant: Any,
+    snapshot_run: ReportSnapshotRun,
+    scope_type: str,
+    percentages: list[str],
+    cohort: Any | None = None,
+    learning_area: Any | None = None,
+    stream_label: str = "",
+    department_key: str = "",
+) -> AcademicAggregate:
+    metrics = build_scope_aggregate(scope_type=scope_type, percentages=percentages)
+    return AcademicAggregate.objects.create(
+        tenant=tenant,
+        snapshot_run=snapshot_run,
+        academic_year=snapshot_run.academic_year,
+        term=snapshot_run.term,
+        scope_type=scope_type,
+        grade_level=(
+            getattr(cohort, "grade_level", None) if cohort is not None else None
+        ),
+        cohort=cohort,
+        learning_area=learning_area,
+        stream_label=stream_label,
+        department_key=department_key,
+        metrics=metrics,
+        min_group_size_met=bool(metrics["min_group_size_met"]),
+    )
+
+
+def compute_report_snapshot_aggregates(
+    *,
+    tenant: Any,
+    snapshot_run: ReportSnapshotRun,
+) -> list[AcademicAggregate]:
+    learners = list(
+        get_learner_report_snapshots(tenant=tenant, snapshot_run=snapshot_run)
+    )
+    lines = list(
+        get_report_subject_line_snapshots(tenant=tenant, snapshot_run=snapshot_run)
+    )
+    aggregates = [
+        _create_aggregate(
+            tenant=tenant,
+            snapshot_run=snapshot_run,
+            scope_type=AcademicAggregate.ScopeType.SCHOOL,
+            percentages=_percentages(learners),
+        )
+    ]
+
+    cohorts = {learner.cohort_id: learner.cohort for learner in learners}
+    for cohort_id, cohort in sorted(cohorts.items(), key=lambda item: str(item[0])):
+        cohort_learners = [
+            learner for learner in learners if learner.cohort_id == cohort_id
+        ]
+        aggregates.append(
+            _create_aggregate(
+                tenant=tenant,
+                snapshot_run=snapshot_run,
+                scope_type=AcademicAggregate.ScopeType.COHORT,
+                percentages=_percentages(cohort_learners),
+                cohort=cohort,
+            )
+        )
+        stream_label = (
+            getattr(cohort, "stream_label", "") or getattr(cohort, "name", "")
+        )
+        aggregates.append(
+            _create_aggregate(
+                tenant=tenant,
+                snapshot_run=snapshot_run,
+                scope_type=AcademicAggregate.ScopeType.STREAM,
+                percentages=_percentages(cohort_learners),
+                cohort=cohort,
+                stream_label=stream_label,
+            )
+        )
+
+    learning_areas = {line.learning_area_id: line.learning_area for line in lines}
+    for learning_area_id, learning_area in sorted(
+        learning_areas.items(), key=lambda item: str(item[0])
+    ):
+        subject_lines = [
+            line for line in lines if line.learning_area_id == learning_area_id
+        ]
+        aggregates.append(
+            _create_aggregate(
+                tenant=tenant,
+                snapshot_run=snapshot_run,
+                scope_type=AcademicAggregate.ScopeType.SUBJECT,
+                percentages=_subject_percentages(subject_lines),
+                learning_area=learning_area,
+            )
+        )
+        aggregates.append(
+            _create_aggregate(
+                tenant=tenant,
+                snapshot_run=snapshot_run,
+                scope_type=AcademicAggregate.ScopeType.DEPARTMENT,
+                percentages=_subject_percentages(subject_lines),
+                learning_area=learning_area,
+                department_key=getattr(learning_area, "code", ""),
+            )
+        )
+    return aggregates
+
+
+@transaction.atomic
+def create_report_snapshot_run(
+    *,
+    actor: Any,
+    tenant: Any,
+    academic_year: Any,
+    term: Any,
+    filters: dict[str, Any] | None = None,
+) -> ReportSnapshotRun:
+    context = _policy_context(
+        actor=actor,
+        tenant=tenant,
+        action="grading.report_snapshot.compute",
+        role_codes=GRADING_ACADEMIC_HEAD_ROLE_CODES
+        | {Role.RoleCode.PRINCIPAL.value},
+    )
+    if not can_compute_report_snapshot(context, tenant=tenant):
+        raise ValidationError({"report_snapshot": "Report snapshot is not authorized."})
+    assessments = list(
+        get_academic_head_readiness_scope(
+            tenant=tenant,
+            filters={
+                "academic_year_id": getattr(academic_year, "id", academic_year),
+                "term_id": getattr(term, "id", term),
+                **(filters or {}),
+            },
+        )
+    )
+    snapshot_run = ReportSnapshotRun.objects.create(
+        tenant=tenant,
+        academic_year=academic_year,
+        term=term,
+        requested_by=actor,
+        status=ReportSnapshotRun.Status.RUNNING,
+    )
+    eligibility_results = _create_eligibility_records(
+        tenant=tenant,
+        snapshot_run=snapshot_run,
+        assessments=assessments,
+    )
+    eligible_ids = _eligible_compilation_ids(eligibility_results)
+    source_rows = _snapshot_source_rows(tenant=tenant, compilation_run_ids=eligible_ids)
+    _build_report_snapshots(
+        tenant=tenant,
+        snapshot_run=snapshot_run,
+        source_rows=source_rows,
+    )
+    compute_report_snapshot_aggregates(tenant=tenant, snapshot_run=snapshot_run)
+    summary = summarize_eligibility(eligibility_results)
+    status = (
+        ReportSnapshotRun.Status.COMPLETE
+        if summary["all_eligible"]
+        else ReportSnapshotRun.Status.PARTIAL
+        if summary["eligible_count"]
+        else ReportSnapshotRun.Status.BLOCKED
+    )
+    snapshot_run.status = status
+    snapshot_run.eligibility_summary = summary
+    snapshot_run.source_compilation_run_ids = sorted(eligible_ids)
+    snapshot_run.completed_at = timezone.now()
+    snapshot_run.save(
+        update_fields=[
+            "status",
+            "eligibility_summary",
+            "source_compilation_run_ids",
+            "completed_at",
+            "updated_at",
+        ]
+    )
+    return snapshot_run
+
+
+def _latest_report_snapshot_run(*, tenant: Any) -> ReportSnapshotRun | None:
+    if tenant is None:
+        return None
+    return (
+        ReportSnapshotRun.objects.filter(
+            tenant=tenant,
+            status__in=[
+                ReportSnapshotRun.Status.COMPLETE,
+                ReportSnapshotRun.Status.PARTIAL,
+            ],
+        )
+        .order_by("-completed_at", "-created_at")
+        .first()
+    )
+
+
+def _learner_projection_items(
+    snapshots: list[LearnerReportSnapshot],
+) -> list[dict[str, Any]]:
+    return [
+        {
+            "snapshot_id": str(snapshot.id),
+            "student_id": str(snapshot.student_id),
+            "cohort_id": str(snapshot.cohort_id),
+            "average_percentage": str(snapshot.average_percentage),
+            "subject_count": snapshot.subject_count,
+        }
+        for snapshot in snapshots
+    ]
+
+
+def _aggregate_projection_items(
+    aggregates: list[AcademicAggregate],
+) -> list[dict[str, Any]]:
+    return [
+        {
+            "aggregate_id": str(aggregate.id),
+            "scope_type": aggregate.scope_type,
+            "cohort_id": str(aggregate.cohort_id or ""),
+            "learning_area_id": str(aggregate.learning_area_id or ""),
+            "stream_label": aggregate.stream_label,
+            "department_key": aggregate.department_key,
+            "metrics": aggregate.metrics,
+            "min_group_size_met": aggregate.min_group_size_met,
+        }
+        for aggregate in aggregates
+    ]
+
+
+def _analytics_projection(
+    *,
+    projection_type: str,
+    snapshot_run: ReportSnapshotRun | None,
+    learners: list[LearnerReportSnapshot],
+    aggregates: list[AcademicAggregate],
+) -> dict[str, Any]:
+    return build_role_analytics_projection(
+        projection_type=projection_type,
+        learner_snapshots=_learner_projection_items(learners),
+        aggregates=_aggregate_projection_items(aggregates),
+        readiness_summary=(
+            snapshot_run.eligibility_summary if snapshot_run is not None else {}
+        ),
+    )
+
+
+def get_principal_analytics_projection(*, actor: Any, tenant: Any) -> dict[str, Any]:
+    context = _policy_context(
+        actor=actor,
+        tenant=tenant,
+        action="grading.analytics.principal.view",
+        role_codes={Role.RoleCode.PRINCIPAL.value, Role.RoleCode.SCHOOL_ADMIN.value},
+    )
+    if not can_view_principal_analytics(context):
+        return _analytics_projection(
+            projection_type="principal",
+            snapshot_run=None,
+            learners=[],
+            aggregates=[],
+        )
+    snapshot_run = _latest_report_snapshot_run(tenant=tenant)
+    if snapshot_run is None:
+        return _analytics_projection(
+            projection_type="principal",
+            snapshot_run=None,
+            learners=[],
+            aggregates=[],
+        )
+    learners = list(
+        get_learner_report_snapshots(tenant=tenant, snapshot_run=snapshot_run)
+    )
+    aggregates = list(
+        get_academic_aggregates(tenant=tenant, snapshot_run=snapshot_run)
+    )
+    return _analytics_projection(
+        projection_type="principal",
+        snapshot_run=snapshot_run,
+        learners=learners,
+        aggregates=aggregates,
+    )
+
+
+def get_deputy_analytics_projection(*, actor: Any, tenant: Any) -> dict[str, Any]:
+    context = _policy_context(
+        actor=actor,
+        tenant=tenant,
+        action="grading.analytics.deputy.view",
+        role_codes={
+            Role.RoleCode.DEPUTY_PRINCIPAL.value,
+            Role.RoleCode.PRINCIPAL.value,
+            Role.RoleCode.SCHOOL_ADMIN.value,
+        },
+    )
+    if not can_view_deputy_analytics(context):
+        return _analytics_projection(
+            projection_type="deputy_head_academics",
+            snapshot_run=None,
+            learners=[],
+            aggregates=[],
+        )
+    snapshot_run = _latest_report_snapshot_run(tenant=tenant)
+    if snapshot_run is None:
+        return _analytics_projection(
+            projection_type="deputy_head_academics",
+            snapshot_run=None,
+            learners=[],
+            aggregates=[],
+        )
+    learners = list(
+        get_learner_report_snapshots(tenant=tenant, snapshot_run=snapshot_run)
+    )
+    aggregates = list(
+        get_academic_aggregates(tenant=tenant, snapshot_run=snapshot_run)
+    )
+    return _analytics_projection(
+        projection_type="deputy_head_academics",
+        snapshot_run=snapshot_run,
+        learners=learners,
+        aggregates=aggregates,
+    )
+
+
+def get_hod_analytics_projection(*, actor: Any, tenant: Any) -> dict[str, Any]:
+    context = _policy_context(
+        actor=actor,
+        tenant=tenant,
+        action="grading.analytics.hod.view",
+        role_codes={Role.RoleCode.HOD.value},
+    )
+    snapshot_run = _latest_report_snapshot_run(tenant=tenant)
+    if snapshot_run is None:
+        return _analytics_projection(
+            projection_type="hod",
+            snapshot_run=None,
+            learners=[],
+            aggregates=[],
+        )
+    lines = list(
+        get_report_subject_line_snapshots(
+            tenant=tenant,
+            snapshot_run=snapshot_run,
+            actor=actor,
+        )
+    )
+    if not lines:
+        return _analytics_projection(
+            projection_type="hod",
+            snapshot_run=snapshot_run,
+            learners=[],
+            aggregates=[],
+        )
+    visible_learning_area_ids = {
+        line.learning_area_id
+        for line in lines
+        if can_view_hod_analytics(context, assessment=line.assessment)
+    }
+    aggregates = [
+        aggregate
+        for aggregate in get_academic_aggregates(
+            tenant=tenant,
+            snapshot_run=snapshot_run,
+        )
+        if aggregate.learning_area_id in visible_learning_area_ids
+        and can_view_hod_analytics(context, aggregate=aggregate)
+    ]
+    learner_ids = {
+        line.student_id
+        for line in lines
+        if line.learning_area_id in visible_learning_area_ids
+    }
+    learners = list(
+        get_learner_report_snapshots(tenant=tenant, snapshot_run=snapshot_run).filter(
+            student_id__in=learner_ids
+        )
+    )
+    return _analytics_projection(
+        projection_type="hod",
+        snapshot_run=snapshot_run,
+        learners=learners,
+        aggregates=aggregates,
+    )
+
+
+def get_class_teacher_analytics_projection(
+    *,
+    actor: Any,
+    tenant: Any,
+    cohort_id: Any,
+) -> dict[str, Any]:
+    context = _policy_context(
+        actor=actor,
+        tenant=tenant,
+        action="grading.analytics.class_teacher.view",
+        role_codes={Role.RoleCode.CLASS_TEACHER.value, Role.RoleCode.HOD.value},
+    )
+    if not can_view_class_teacher_analytics(context, cohort_id=cohort_id):
+        return _analytics_projection(
+            projection_type="class_teacher",
+            snapshot_run=None,
+            learners=[],
+            aggregates=[],
+        )
+    snapshot_run = _latest_report_snapshot_run(tenant=tenant)
+    if snapshot_run is None:
+        return _analytics_projection(
+            projection_type="class_teacher",
+            snapshot_run=None,
+            learners=[],
+            aggregates=[],
+        )
+    learners = list(
+        get_learner_report_snapshots(
+            tenant=tenant,
+            snapshot_run=snapshot_run,
+            cohort_id=cohort_id,
+        )
+    )
+    aggregates = list(
+        get_academic_aggregates(
+            tenant=tenant,
+            snapshot_run=snapshot_run,
+            cohort_id=cohort_id,
+        )
+    )
+    return _analytics_projection(
+        projection_type="class_teacher",
+        snapshot_run=snapshot_run,
+        learners=learners,
+        aggregates=aggregates,
+    )
+
+
+def get_subject_teacher_analytics_projection(
+    *,
+    actor: Any,
+    tenant: Any,
+    learning_area_id: Any,
+) -> dict[str, Any]:
+    context = _policy_context(
+        actor=actor,
+        tenant=tenant,
+        action="grading.analytics.subject_teacher.view",
+        role_codes={Role.RoleCode.SUBJECT_TEACHER.value, Role.RoleCode.HOD.value},
+    )
+    snapshot_run = _latest_report_snapshot_run(tenant=tenant)
+    if snapshot_run is None:
+        return _analytics_projection(
+            projection_type="subject_teacher",
+            snapshot_run=None,
+            learners=[],
+            aggregates=[],
+        )
+    lines = list(
+        get_report_subject_line_snapshots(
+            tenant=tenant,
+            snapshot_run=snapshot_run,
+            learning_area_id=learning_area_id,
+            actor=actor,
+        )
+    )
+    visible = [
+        line
+        for line in lines
+        if can_view_subject_teacher_analytics(context, subject_line=line)
+    ]
+    learner_ids = {line.student_id for line in visible}
+    learners = list(
+        get_learner_report_snapshots(tenant=tenant, snapshot_run=snapshot_run).filter(
+            student_id__in=learner_ids
+        )
+    )
+    aggregates = list(
+        get_academic_aggregates(
+            tenant=tenant,
+            snapshot_run=snapshot_run,
+            learning_area_id=learning_area_id,
+        )
+    )
+    return _analytics_projection(
+        projection_type="subject_teacher",
+        snapshot_run=snapshot_run,
+        learners=learners,
+        aggregates=aggregates,
+    )
+
+
+def get_future_parent_snapshot_projection(
+    *,
+    actor: Any,
+    tenant: Any,
+    learner_id: Any,
+) -> dict[str, Any]:
+    context = _policy_context(
+        actor=actor,
+        tenant=tenant,
+        action="grading.analytics.future_parent.view",
+        role_codes={Role.RoleCode.GUARDIAN.value},
+    )
+    if not can_view_future_parent_snapshot(context, tenant=tenant):
+        return build_future_parent_snapshot_projection()
+    return build_future_parent_snapshot_projection()

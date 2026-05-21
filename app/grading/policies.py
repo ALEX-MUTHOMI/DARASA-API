@@ -15,8 +15,12 @@ from core.policies import PolicyContext
 from core.selectors import user_has_role_in_tenant
 from grading.models import (
     Assessment,
+    AcademicAggregate,
     GradeCorrectionRequest,
     GradeRecord,
+    LearnerReportSnapshot,
+    ReportSnapshotRun,
+    ReportSubjectLineSnapshot,
     SchoolGradingSchema,
 )
 
@@ -483,6 +487,148 @@ def can_view_future_parent_readiness(context: PolicyContext, *, tenant: Any) -> 
     """Fail closed until approved report-release and guardian mapping exist."""
 
     if context.action != "grading.readiness.future_parent.view":
+        return False
+    if context.tenant != tenant:
+        return False
+    return False
+
+
+def can_compute_report_snapshot(
+    context: PolicyContext,
+    *,
+    tenant: Any,
+) -> bool:
+    if context.action != "grading.report_snapshot.compute":
+        return False
+    if context.tenant != tenant:
+        return False
+    if not _context_is_valid(context):
+        return False
+    return context.role.code in GRADING_EXECUTIVE_ROLES
+
+
+def can_view_report_snapshot(
+    context: PolicyContext,
+    *,
+    snapshot: LearnerReportSnapshot | ReportSubjectLineSnapshot | ReportSnapshotRun,
+) -> bool:
+    if context.action != "grading.report_snapshot.view":
+        return False
+    if not _context_is_valid(context) or not _in_tenant(context, snapshot):
+        return False
+    return context.role.code in GRADING_EXECUTIVE_ROLES | GRADING_TEACHER_ROLES
+
+
+def can_view_principal_analytics(context: PolicyContext) -> bool:
+    if context.action != "grading.analytics.principal.view":
+        return False
+    if not _context_is_valid(context):
+        return False
+    return context.role.code in {
+        Role.RoleCode.PRINCIPAL.value,
+        Role.RoleCode.SCHOOL_ADMIN.value,
+    }
+
+
+def can_view_deputy_analytics(context: PolicyContext) -> bool:
+    if context.action != "grading.analytics.deputy.view":
+        return False
+    if not _context_is_valid(context):
+        return False
+    return context.role.code in GRADING_EXECUTIVE_ROLES
+
+
+def can_view_hod_analytics(
+    context: PolicyContext,
+    *,
+    assessment: Assessment | None = None,
+    aggregate: AcademicAggregate | None = None,
+) -> bool:
+    if context.action != "grading.analytics.hod.view":
+        return False
+    if not _context_is_valid(context) or context.role.code != Role.RoleCode.HOD.value:
+        return False
+    if assessment is not None:
+        return _has_assignment_for_assessment(context, assessment=assessment)
+    if aggregate is not None and aggregate.learning_area_id is not None:
+        return TeacherAssignment.objects.filter(
+            tenant=context.tenant,
+            teacher=context.actor,
+            learning_area_id=aggregate.learning_area_id,
+            academic_year=aggregate.academic_year,
+            term=aggregate.term,
+            is_active=True,
+        ).exists()
+    return False
+
+
+def can_view_teacher_analytics(
+    context: PolicyContext,
+    *,
+    subject_line: ReportSubjectLineSnapshot | None = None,
+) -> bool:
+    if context.action != "grading.analytics.teacher.view":
+        return False
+    if not _context_is_valid(context):
+        return False
+    if subject_line is None:
+        return context.role.code in GRADING_TEACHER_ROLES
+    return _has_assignment_for_assessment(context, assessment=subject_line.assessment)
+
+
+def can_view_subject_teacher_analytics(
+    context: PolicyContext,
+    *,
+    subject_line: ReportSubjectLineSnapshot | None = None,
+) -> bool:
+    if context.action != "grading.analytics.subject_teacher.view":
+        return False
+    if not _context_is_valid(context):
+        return False
+    if context.role.code not in {
+        Role.RoleCode.SUBJECT_TEACHER.value,
+        Role.RoleCode.HOD.value,
+    }:
+        return False
+    if subject_line is None:
+        return True
+    return _has_assignment_for_assessment(context, assessment=subject_line.assessment)
+
+
+def can_view_class_teacher_analytics(
+    context: PolicyContext,
+    *,
+    learner_snapshot: LearnerReportSnapshot | None = None,
+    cohort_id: Any | None = None,
+) -> bool:
+    if context.action != "grading.analytics.class_teacher.view":
+        return False
+    if not _context_is_valid(context):
+        return False
+    if context.role.code not in {
+        Role.RoleCode.CLASS_TEACHER.value,
+        Role.RoleCode.HOD.value,
+    }:
+        return False
+    target_cohort_id = (
+        getattr(learner_snapshot, "cohort_id", None)
+        if learner_snapshot is not None
+        else cohort_id
+    )
+    if target_cohort_id is None:
+        return False
+    return TeacherAssignment.objects.filter(
+        tenant=context.tenant,
+        teacher=context.actor,
+        cohort_id=target_cohort_id,
+        is_active=True,
+    ).exists()
+
+
+def can_view_future_parent_snapshot(context: PolicyContext, *, tenant: Any) -> bool:
+    """Fail closed until approved report release and guardian mapping exist."""
+
+    if context.action != "grading.analytics.future_parent.view":
         return False
     if context.tenant != tenant:
         return False
