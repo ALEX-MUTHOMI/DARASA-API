@@ -1,16 +1,30 @@
-# Replace these placeholder owners with real repository teams before relying on
-# branch protection. The paths still document which surfaces require platform
-# and security review.
+# `@backtofront-development/platform-security` remains one of the
+# placeholder owners referenced below: it is not enforced by GitHub as
+# CODEOWNERS review until it exists as a real team on this GitHub
+# account/org. `@ALEX-MUTHOMI` is the actual repository owner and is listed
+# directly on the highest-risk, CI/CD-pipeline-execution-critical paths
+# (OWASP CICD-SEC-4: Poisoned Pipeline Execution) so review enforcement is
+# real today, not aspirational. Replace/extend the remaining placeholder
+# owners with real reviewer teams as the project grows.
 
+# --- CI/CD pipeline execution surface (PPE-critical: review is mandatory) ---
+.github/workflows/** @ALEX-MUTHOMI @backtofront-development/platform-security
+.github/dependabot.yml @ALEX-MUTHOMI @backtofront-development/platform-security
+.github/CODEOWNERS @ALEX-MUTHOMI
+scripts/** @ALEX-MUTHOMI @backtofront-development/platform-security
+Dockerfile @ALEX-MUTHOMI @backtofront-development/platform-security
+docker-compose.yml @ALEX-MUTHOMI @backtofront-development/platform-security
+docker-compose-deploy.yml @ALEX-MUTHOMI @backtofront-development/platform-security
+pyproject.toml @ALEX-MUTHOMI @backtofront-development/platform-security
+poetry.lock @ALEX-MUTHOMI @backtofront-development/platform-security
+
+# --- Application security-sensitive surface ---
 app/events/** @backtofront-development/platform-security
 app/darasa_project/settings.py @backtofront-development/platform-security
 app/darasa_project/celery.py @backtofront-development/platform-security
-.github/workflows/** @backtofront-development/platform-security
-Dockerfile @backtofront-development/platform-security
-docker-compose.yml @backtofront-development/platform-security
-pyproject.toml @backtofront-development/platform-security
-poetry.lock @backtofront-development/platform-security
-scripts/** @backtofront-development/platform-security
+app/core/middleware.py @backtofront-development/platform-security
+app/core/security_events.py @backtofront-development/platform-security
+app/core/tracing.py @backtofront-development/platform-security
 docs/SECURITY_MODEL.md @backtofront-development/platform-security
 docs/EVENT_BACKBONE.md @backtofront-development/platform-security
 docs/EVENT_CONTRACTS.md @backtofront-development/platform-security

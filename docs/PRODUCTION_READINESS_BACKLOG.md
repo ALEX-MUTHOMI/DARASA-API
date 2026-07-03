@@ -200,9 +200,16 @@ closeout. CI remains authoritative clean-run verification.
 
 ## 12. Developer Governance Backlog
 
+See `docs/security/OWASP_CICD_AUDIT_AND_INFRA_CHECKLIST.md` for an OWASP
+CI/CD Top 10-specific audit of the GitHub Actions pipeline itself (action
+pinning, artifact digest pinning, CODEOWNERS on pipeline paths, Dependabot,
+and the remaining human-only GitHub UI configuration steps). That document
+is scoped to the CI/CD pipeline; this section remains the broader developer
+governance backlog.
+
 | ID | Title | Area | Priority | Risk if not done | Dependency | Owner role | Suggested phase | Acceptance criteria |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| GOV-P0-001 | CODEOWNERS | Developer Governance | P0 — production blocker | High-risk code can merge without correct reviewers. | Repository policy | Engineering Manager | Governance | Owners for CCT, grading, events, security, migrations, CI, docs. |
+| GOV-P0-001 | CODEOWNERS | Developer Governance | P0 — production blocker | High-risk code can merge without correct reviewers. | Repository policy | Engineering Manager | Governance | Owners for CCT, grading, events, security, migrations, CI, docs. **Partially done**: `.github/CODEOWNERS` now lists the real repository owner (`@ALEX-MUTHOMI`) on every CI/CD-execution-critical path (workflows, Dockerfile, scripts, dependency manifests) so review enforcement is real, not placeholder-only. Application domain paths (CCT, grading, events) still reference an unverified placeholder team (`@backtofront-development/platform-security`) that must be replaced with a real team before CODEOWNERS review is enforceable there, and branch protection must still be turned on (see `docs/security/OWASP_CICD_AUDIT_AND_INFRA_CHECKLIST.md`) for CODEOWNERS to actually block merges. |
 | GOV-P0-002 | Protected Branches and Required Reviews | Developer Governance | P0 — production blocker | Production branches can change without control. | GitHub settings | Engineering Manager | Governance | Required checks, required reviews, admin bypass policy, signed/reviewed release process. |
 | GOV-P1-003 | Migration Review Checklist | Developer Governance | P1 — required before national rollout | Schema changes may break data or deployments. | Migration discipline | Lead Backend Engineer | Governance | Checklist for reversibility, locking risk, data migration safety, tenant impact, rollback. |
 | GOV-P1-004 | Security Review Checklist | Developer Governance | P1 — required before national rollout | Security-sensitive changes may miss threat review. | Security owner | Security Architect | Governance | Checklist for auth, tenant isolation, PII, events, uploads, SSRF, XSS, rate limits. |

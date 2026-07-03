@@ -1,6 +1,11 @@
 # syntax=docker/dockerfile:1.7
 
-FROM python:3.11-slim-bookworm AS base
+# Pinned by digest (not just tag) so the base image is immutable and cannot
+# be silently swapped upstream (OWASP CICD-SEC-9: Improper Artifact Integrity
+# Validation). Digest verified against the `python:3.11-slim-bookworm` tag on
+# 2026-07-03; Dependabot's "docker" ecosystem entry in
+# .github/dependabot.yml keeps this current going forward.
+FROM python:3.11-slim-bookworm@sha256:721dc13fd1be0a771e54b72097634291d628d0007dee9da777e2ce676a9c998f AS base
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
