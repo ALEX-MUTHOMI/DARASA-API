@@ -232,18 +232,14 @@ already produced against the current minimal HTTP surface.
 
 ## 13. Suggested Execution Sequence
 
-1. Close this backlog documentation phase.
-2. Rerun GitHub Actions.
-3. Return to Phase 6D grading readiness dashboards / report-ready projections.
-4. Continue grading phases until report-ready.
-5. Before exposing CCT public uploads, implement CCT production upload
-   infrastructure.
-6. Before national rollout, implement observability, rate limits, WAF,
-   governance roles, and notice workers.
-7. Before reports, ensure Phase 6D/6E and CCT production blockers are tracked.
+**Superseded by `docs/ROADMAP_TO_PRODUCTION.md` (2026-07-03).** Phases 6D,
+6E, and 7A referenced below are now all complete; the numbered sequence that
+used to live in this section pointed back to a phase that no longer needs
+re-entry. See the roadmap document for the current, phase-numbered plan
+(7B through 15) and its dependency graph.
 
-We are not stopping development until every production blocker is done. We are
-recording production blockers so they are not forgotten.
+We are not stopping development until every production blocker is done. We
+are recording production blockers so they are not forgotten.
 
 ## 14. Definition of Production-Ready
 
@@ -260,14 +256,11 @@ Darasa-Core is production-ready only when:
   object storage, and worker operations are live and tested.
 - Production runbooks and ownership are assigned.
 
-## 15. Phase Re-entry Point: Return to Grading Phase 6D
+## 15. Phase Re-entry Point
 
-After this backlog documentation phase, product development returns to:
-
-```text
-Phase 6D — Grading Readiness Dashboards / Report-Ready Projections
-```
-
-Phase 6D should consume Phase 6C canonical compiled facts and CCT governance
-state. It must not generate reports, PDFs, NLP remarks, parent analytics, or a
-separate academic truth.
+**Superseded by `docs/ROADMAP_TO_PRODUCTION.md` (2026-07-03).** Phase 6D is
+complete (as are 6E and 7A). The current re-entry point is Phase 7B (CCT
+production upload infrastructure) and/or Phase 10 (API / Integration
+Contract Suite), which have no blocking dependency on each other — see the
+roadmap document for the full phase-by-phase plan and why those two are the
+recommended starting points.

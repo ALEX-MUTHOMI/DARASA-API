@@ -8,7 +8,9 @@ See `docs/PRODUCT_VISION.md` for the national-scale (tens of thousands of
 Kenyan schools with widely varying capacity), CBC-native, "everyday tool for
 teachers/administration/principals/deputies" target these phase boundaries
 are drawn against. That vision explains *why* boundaries are placed where
-they are; this document records *what* has actually been built.
+they are; this document records *what* has actually been built. See
+`docs/ROADMAP_TO_PRODUCTION.md` for what comes next, phase by phase, through
+national rollout.
 
 ## Completed Foundations
 
