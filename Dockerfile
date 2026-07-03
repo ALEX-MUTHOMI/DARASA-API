@@ -69,4 +69,15 @@ EXPOSE 8000
 
 USER darasa
 
+# Container-level liveness check. /api/health/ is answered by
+# core.middleware.HealthCheckBypassMiddleware *before* tenant resolution, so
+# it works regardless of Host header — exactly what an orchestrator's
+# health probe needs, since it has no reason to know a specific tenant's
+# domain. This does not replace real uptime/synthetic monitoring in a
+# deployed environment (see docs/OBSERVABILITY.md); it only answers "is the
+# process inside this container alive," which Dependabot has no bearing on
+# whatsoever (see docs/OBSERVABILITY.md for that distinction too).
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+    CMD curl -f http://127.0.0.1:8000/api/health/ || exit 1
+
 CMD ["bash", "/scripts/run.sh"]

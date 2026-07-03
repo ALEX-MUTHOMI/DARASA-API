@@ -169,3 +169,15 @@ the current application layer.
 Phase 4C focuses on Senior School impact and tracks Junior-to-Senior signals
 only when they affect Senior School readiness, transition, pathways, assessment
 guidance, or teacher readiness. It does not build a Junior School product layer.
+
+## Dynamic Security Testing
+
+CCT has no HTTP endpoints today (see `docs/API_DOCUMENTATION.md`), so
+dynamic scanners like OWASP ZAP have nothing CCT-specific to attack yet —
+this is unrelated to CCT's own no-crawling rule above ("CCT is not a
+crawler" describes Darasa's outbound requests; ZAP tests Darasa's inbound
+HTTP surface, which are two different meanings of "crawl"). See
+`docs/security/ZAP_DAST_STRATEGY.md` for the dynamic testing plan for once
+Phase 10 exposes CCT's evidence-submission and governance endpoints over
+HTTP, and for the real, verified fixes that strategy already produced
+against the current minimal application-wide HTTP surface.

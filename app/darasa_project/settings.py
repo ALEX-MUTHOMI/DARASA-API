@@ -237,6 +237,7 @@ INSTALLED_APPS = SHARED_APPS + [
 ]
 
 MIDDLEWARE = [
+    "core.middleware.HealthCheckBypassMiddleware",
     "django_tenants.middleware.main.TenantMainMiddleware",
     "core.middleware.RequestObservabilityMiddleware",
     "django.middleware.security.SecurityMiddleware",

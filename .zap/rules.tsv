@@ -1,0 +1,19 @@
+# OWASP ZAP baseline scan rule overrides for Darasa-Core.
+#
+# Format (tab-separated, per https://www.zaproxy.org/docs/docker/baseline-scan/):
+#   <rule-id>\t<IGNORE|WARN|FAIL>\t<rule-name>
+#
+# Every override below was added only after a real baseline scan run
+# (see docs/security/ZAP_DAST_STRATEGY.md), never speculatively. Do not add
+# an IGNORE line to make a real finding disappear without first fixing it or
+# explicitly accepting the underlying risk in
+# docs/PRODUCTION_READINESS_BACKLOG.md.
+#
+# 2026-07-03: 10049 ("Non-Storable Content") fires because
+# core.middleware.SecurityHeadersMiddleware deliberately sets
+# `Cache-Control: no-store` on every non-admin/static/media response. ZAP's
+# rule flags non-storable content informationally to prompt a human check
+# that this was intentional, not a caching misconfiguration — it was
+# intentional (see the ADR-style comment in core/middleware.py), so this is
+# a confirmed false positive, not a suppressed real finding.
+10049	IGNORE	Non-Storable Content

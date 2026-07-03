@@ -9,3 +9,4 @@ trade-off accepted — not a full design document.
 - [0002 - Schema-per-tenant isolation](0002-schema-per-tenant-isolation.md)
 - [0003 - Evidence-based CCT instead of a live curriculum crawler](0003-evidence-based-cct-over-live-crawler.md)
 - [0004 - Observability wiring: structured logs, metrics, disabled-by-default tracing](0004-observability-wiring.md)
+- [0005 - Liveness checks bypass tenant resolution entirely](0005-health-checks-bypass-tenant-resolution.md)

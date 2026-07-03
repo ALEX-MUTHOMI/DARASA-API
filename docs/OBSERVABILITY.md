@@ -89,6 +89,41 @@ require an authenticated staff user (`SPECTACULAR_SETTINGS["SERVE_PERMISSIONS"]`
 so full route/shape metadata is not handed to anonymous callers in
 production.
 
+### Liveness: "is the app alive?" (and why Dependabot has nothing to do with this)
+
+`Dependabot` (`.github/dependabot.yml`) and "is the app alive in
+production" are unrelated concerns, worth stating explicitly because they
+are easy to conflate:
+
+- **Dependabot** opens pull requests when a newer (or security-patched)
+  version of a dependency exists. It runs on a schedule against the
+  repository's manifests (`pyproject.toml`, GitHub Actions, the Dockerfile's
+  base image) — it never talks to a running Darasa instance, has no concept
+  of "production," and does not auto-merge or deploy anything. A human (or
+  CI, if configured to) still has to review, test, and merge each PR it
+  opens. It answers "is a dependency out of date or vulnerable," never "is
+  the app currently running."
+- **Liveness** ("is the process alive right now") is what
+  `/api/health/` plus the Docker `HEALTHCHECK` directive (`Dockerfile`)
+  answer. This was broken until this change: `TenantMainMiddleware`
+  resolves the active tenant schema from the request's Host header, and a
+  Host with no matching `Domain` row 404s — which is exactly what any
+  container orchestrator's health probe or external uptime monitor would
+  hit, since they have no reason to know a specific school's tenant domain.
+  `core.middleware.HealthCheckBypassMiddleware` now answers `/api/health/`
+  *before* tenant resolution runs, so a liveness probe gets a real answer
+  regardless of Host header. Verified with a real `docker build` + `docker
+  run`: `docker ps` reports the container `(healthy)`.
+- **Uptime/synthetic monitoring in a real deployed environment** ("is the
+  publicly reachable URL responding right now, and alert someone if not")
+  is still a genuine gap: it requires an external service (e.g. an
+  uptime-check provider, or Prometheus Blackbox Exporter + Alertmanager)
+  polling a real deployed URL, which does not exist until Darasa is
+  actually deployed somewhere. `/api/health/` being reliable is the
+  *precondition* for that monitoring to be meaningful, not the monitoring
+  itself. Tracked as `OBS-P0-001`/`OBS-P1-006` in
+  `docs/PRODUCTION_READINESS_BACKLOG.md`.
+
 ### Security headers
 
 `core.middleware.SecurityHeadersMiddleware` adds `Content-Security-Policy`,

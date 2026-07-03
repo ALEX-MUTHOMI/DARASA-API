@@ -19,7 +19,7 @@ import uuid
 from collections.abc import Callable
 
 import structlog
-from django.http import HttpRequest, HttpResponse
+from django.http import HttpRequest, HttpResponse, JsonResponse
 
 from core.metrics import record_http_request
 
@@ -29,6 +29,32 @@ REQUEST_ID_RESPONSE_HEADER = "X-Request-ID"
 MAX_INBOUND_REQUEST_ID_LENGTH = 128
 
 request_logger = structlog.get_logger("darasa.request")
+
+
+class HealthCheckBypassMiddleware:
+    """Answers the liveness probe before tenant resolution can 404 it.
+
+    `TenantMainMiddleware` resolves the active schema from the request's
+    Host header against the `Domain` table; a host with no matching tenant
+    domain 404s (see docs/security/ZAP_DAST_STRATEGY.md and ADR 0002). A
+    container orchestrator's liveness/readiness probe, or an external
+    uptime monitor, has no reason to know or send a specific tenant's Host
+    header — it hits the container by IP or `localhost`. Without this
+    bypass, `/api/health/` would 404 for exactly the callers who most need
+    it to work, making Docker `HEALTHCHECK` / Kubernetes probes / uptime
+    monitoring permanently report "unhealthy" regardless of actual app
+    health. This must run *before* `TenantMainMiddleware` in `MIDDLEWARE`.
+    """
+
+    HEALTH_CHECK_PATH = "/api/health/"
+
+    def __init__(self, get_response: Callable[[HttpRequest], HttpResponse]) -> None:
+        self.get_response = get_response
+
+    def __call__(self, request: HttpRequest) -> HttpResponse:
+        if request.path == self.HEALTH_CHECK_PATH:
+            return JsonResponse({"healthy": True, "service": "darasa-core"})
+        return self.get_response(request)
 
 
 def _resolve_request_id(request: HttpRequest) -> str:
@@ -97,24 +123,61 @@ class RequestObservabilityMiddleware:
 
 
 class SecurityHeadersMiddleware:
-    """Adds defense-in-depth headers Django's SecurityMiddleware omits."""
+    """Adds defense-in-depth headers Django's SecurityMiddleware omits.
 
-    API_PATH_PREFIX = "/api/"
+    Verified against a real OWASP ZAP baseline scan (see
+    docs/security/ZAP_DAST_STRATEGY.md), which caught two real gaps in an
+    earlier version of this middleware: headers were only applied under
+    `/api/` (missing the site root entirely), and a blanket
+    `default-src 'none'` CSP would have silently broken the Swagger UI docs
+    page, which loads its JS/CSS from a CDN. Both are fixed below.
+    """
+
+    # Django admin renders its own inline scripts/styles and Django's
+    # staticfiles/whitenoise already set their own appropriate caching
+    # headers; neither should be overridden by a blanket API-oriented policy.
+    EXEMPT_PATH_PREFIXES = ("/admin/", "/static/", "/media/")
+
+    # The Swagger UI page (only) needs to load JS/CSS from a CDN by default
+    # (drf-spectacular has no bundled 'sidecar' assets installed). Allow
+    # exactly that origin instead of exempting the page from CSP entirely.
+    SWAGGER_UI_PATH_PREFIX = "/api/docs/"
+    SWAGGER_UI_CDN_ORIGIN = "https://cdn.jsdelivr.net"
 
     def __init__(self, get_response: Callable[[HttpRequest], HttpResponse]) -> None:
         self.get_response = get_response
 
     def __call__(self, request: HttpRequest) -> HttpResponse:
         response = self.get_response(request)
-        if request.path.startswith(self.API_PATH_PREFIX):
-            response.setdefault(
-                "Content-Security-Policy",
-                "default-src 'none'; frame-ancestors 'none'; base-uri 'none'",
-            )
+
+        # Never advertise backend server/version details (WSGIServer/x.y in
+        # dev, gunicorn/x.y in production) to a potential attacker.
+        response["Server"] = "Darasa"
+
+        if not request.path.startswith(self.EXEMPT_PATH_PREFIXES):
+            if request.path.startswith(self.SWAGGER_UI_PATH_PREFIX):
+                csp = (
+                    f"default-src 'self'; "
+                    f"script-src 'self' 'unsafe-inline' {self.SWAGGER_UI_CDN_ORIGIN}; "
+                    f"style-src 'self' 'unsafe-inline' {self.SWAGGER_UI_CDN_ORIGIN}; "
+                    f"img-src 'self' data: {self.SWAGGER_UI_CDN_ORIGIN}; "
+                    f"connect-src 'self'; frame-ancestors 'none'; base-uri 'none'"
+                )
+            else:
+                # form-action and frame-ancestors deliberately do not fall
+                # back to default-src per the CSP spec and must be listed
+                # explicitly (ZAP CSP rule 10055 caught this omission).
+                csp = (
+                    "default-src 'none'; frame-ancestors 'none'; "
+                    "form-action 'none'; base-uri 'none'"
+                )
+            response.setdefault("Content-Security-Policy", csp)
             response.setdefault("Cross-Origin-Resource-Policy", "same-origin")
             response.setdefault("Cross-Origin-Opener-Policy", "same-origin")
             response.setdefault(
                 "Permissions-Policy",
                 "geolocation=(), microphone=(), camera=(), payment=()",
             )
+            response.setdefault("Cache-Control", "no-store")
+
         return response

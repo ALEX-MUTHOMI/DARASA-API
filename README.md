@@ -199,6 +199,7 @@ when using Compose.
 | [`docs/TESTING_STRATEGY.md`](docs/TESTING_STRATEGY.md) | Patch/Domain/Full/Deep gates and pytest markers |
 | [`docs/PRODUCTION_READINESS_BACKLOG.md`](docs/PRODUCTION_READINESS_BACKLOG.md) | Prioritized list of what remains before production rollout |
 | [`docs/security/OWASP_CICD_AUDIT_AND_INFRA_CHECKLIST.md`](docs/security/OWASP_CICD_AUDIT_AND_INFRA_CHECKLIST.md) | OWASP CI/CD Top 10 audit of the GitHub Actions pipeline itself |
+| [`docs/security/ZAP_DAST_STRATEGY.md`](docs/security/ZAP_DAST_STRATEGY.md) | Dynamic (OWASP ZAP) security testing: what's real today, what CCT needs before it's dynamically testable |
 | [`docs/adr/`](docs/adr/) | Architecture Decision Records for key trade-offs |
 
 ## Boundary
