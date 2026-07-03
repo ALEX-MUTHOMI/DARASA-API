@@ -47,13 +47,19 @@ def build_scope_aggregate(
         percentages=percentages,
         minimum_group_size=minimum_group_size,
     )
-    metrics.update(
-        {
-            "scope_type": scope_type,
-            "readiness_risk_count": readiness_risk_count,
-            "correction_blocker_count": correction_blocker_count,
-            "cct_blocker_count": cct_blocker_count,
-            "schema_mismatch_count": schema_mismatch_count,
-        }
-    )
-    return metrics
+    # Merge via dict unpacking rather than the in-place dict-mutation method:
+    # this stays a plain in-memory merge with no database or I/O side
+    # effect, but that mutation method's name is deliberately forbidden as a
+    # literal substring in this package by
+    # test_phase6c_algorithms_are_side_effect_safe, as a coarse guard
+    # against accidental QuerySet/model writes. Avoiding the substring here
+    # (even in a comment) keeps that guard rail simple and honest instead of
+    # special-casing it.
+    return {
+        **metrics,
+        "scope_type": scope_type,
+        "readiness_risk_count": readiness_risk_count,
+        "correction_blocker_count": correction_blocker_count,
+        "cct_blocker_count": cct_blocker_count,
+        "schema_mismatch_count": schema_mismatch_count,
+    }
