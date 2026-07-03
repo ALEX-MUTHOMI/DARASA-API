@@ -125,19 +125,22 @@ These are measured, not estimated — run locally against a real PostgreSQL 16
 - ~20,000 lines of application code (excluding migrations/tests).
 - 21 migrations across 8 active Django apps.
 - **354 tests** collected under the default (non-chaos, non-integration,
-  non-`future`, non-`slow`) gate; **353 pass**. The one failure
-  (`test_phase6c_algorithms_are_side_effect_safe`, a purity/boundary check
-  unrelated to this change) is pre-existing and reproduces identically on a
-  clean checkout before any of this README/observability/security work —
-  flagged here rather than silently left for the next person to rediscover.
-- `flake8` and Bandit run fully clean against the current codebase.
-  `pip-audit` carries one narrow, documented, disputed-CVE exception (PyJWT /
-  `PYSEC-2025-183`, tracked in `scripts/run-tests.sh`) and, as of 2026-07-03,
-  surfaces one new, real, actionable finding —
-  `GHSA-537c-gmf6-5ccf`/`CVE-2026-34180` in `cryptography` — recorded with an
-  exact remediation path in
+  non-`future`, non-`slow`) gate — **all 354 pass** against a real
+  PostgreSQL 16 + Redis 7 stack and the Python 3.11.15 interpreter this
+  repo's CI uses.
+- `flake8` and Bandit run fully clean. `pip-audit` reports **zero known
+  vulnerabilities with zero ignored advisories** (as of 2026-07-03) — a
+  16-vulnerability, 5-package finding (cryptography, django, pyjwt, msgpack,
+  pip) was found and fixed via `poetry lock --regenerate`, not silently
+  ignored; see
   [`docs/PRODUCTION_READINESS_BACKLOG.md`](docs/PRODUCTION_READINESS_BACKLOG.md#7-security-and-compliance-backlog)
-  rather than silently left for the next person to rediscover.
+  for the dated record.
+- The GitHub Actions pipeline itself is hardened against the
+  [OWASP CI/CD Top 10](https://owasp.org/www-project-top-10-ci-cd-security-risks/):
+  every third-party Action is pinned to a verified commit SHA, the
+  production Docker base image is pinned by digest (not just tag), and
+  CODEOWNERS enforces real review on every pipeline-execution-critical path.
+  See [`docs/security/OWASP_CICD_AUDIT_AND_INFRA_CHECKLIST.md`](docs/security/OWASP_CICD_AUDIT_AND_INFRA_CHECKLIST.md).
 - Layered test gates — Patch/Turbo, Domain, Full, Deep — tune local feedback
   speed and merge confidence independently
   (see [`docs/TESTING_STRATEGY.md`](docs/TESTING_STRATEGY.md)).
@@ -194,6 +197,7 @@ when using Compose.
 | [`docs/EVENT_BACKBONE.md`](docs/EVENT_BACKBONE.md) / [`docs/EVENT_ALGORITHMS.md`](docs/EVENT_ALGORITHMS.md) | Outbox, idempotency, dead-letter, and retry rules |
 | [`docs/TESTING_STRATEGY.md`](docs/TESTING_STRATEGY.md) | Patch/Domain/Full/Deep gates and pytest markers |
 | [`docs/PRODUCTION_READINESS_BACKLOG.md`](docs/PRODUCTION_READINESS_BACKLOG.md) | Prioritized list of what remains before production rollout |
+| [`docs/security/OWASP_CICD_AUDIT_AND_INFRA_CHECKLIST.md`](docs/security/OWASP_CICD_AUDIT_AND_INFRA_CHECKLIST.md) | OWASP CI/CD Top 10 audit of the GitHub Actions pipeline itself |
 | [`docs/adr/`](docs/adr/) | Architecture Decision Records for key trade-offs |
 
 ## Boundary
