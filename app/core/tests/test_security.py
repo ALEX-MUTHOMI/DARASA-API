@@ -69,6 +69,13 @@ def test_parent_portal_login_enforces_timing_floor(monkeypatch):
         "portals.views.PARENT_LOGIN_RESPONSE_FLOOR_SECONDS",
         0.03,
     )
+    # This test exercises timing-floor behavior, not rate limiting, and
+    # issues more requests than the production parent_login throttle scope
+    # allows. DRF throttle classes freeze `THROTTLE_RATES` from
+    # `settings.REST_FRAMEWORK` at class-import time, so overriding the
+    # Django setting here would not change already-imported throttle
+    # behavior; disable throttling directly on the view instead.
+    monkeypatch.setattr(ParentPortalLoginView, "throttle_classes", [])
 
     view = ParentPortalLoginView.as_view()
 

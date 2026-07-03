@@ -30,6 +30,16 @@ proof before production rollout.
 - Grading stores assessment CBE/CCT context and compilation preserves it.
 - Events are versioned, producer-allowlisted, and reference-only.
 - Patch, Domain, Full, and Deep test gates are defined.
+- Structured JSON logging, request correlation, HTTP-request Prometheus
+  metrics, and a fail-closed metrics endpoint are wired at the application
+  layer (see `docs/OBSERVABILITY.md`). Distributed tracing is implemented but
+  stays disabled until an operator points it at a real collector.
+- The one real public, unauthenticated HTTP endpoint (`parent/login/`) is
+  rate-limited and its attempts/rate-limit hits are structured-logged with a
+  PII-minimized fingerprint instead of the raw admission number.
+- API responses on `/api/` carry defense-in-depth headers (CSP,
+  Permissions-Policy, Cross-Origin-Resource-Policy) beyond Django's built-in
+  `SecurityMiddleware` defaults.
 
 ## 3. What Is Not Production-Ready Yet
 
@@ -43,7 +53,17 @@ proof before production rollout.
   not production infrastructure yet.
 - Grading needs Phase 6D readiness dashboards and report-ready projection work.
 - Whole-app observability, incident response, backup/restore, HA, and national
-  load testing remain pending.
+  load testing remain pending. Log aggregation, dashboards, alerting, and
+  domain-specific metrics remain open even though application-layer
+  structured logging and HTTP metrics are now wired
+  (see `docs/OBSERVABILITY.md`).
+- Grading, curriculum/CCT, academics, and the event backbone have no HTTP API
+  surface at all yet — they are service-layer only. Rate limiting, security
+  headers, and the metrics endpoint currently apply only to the small HTTP
+  surface that exists today (health check, parent-login stub, docs/metrics).
+  Introducing real domain HTTP endpoints will need its own rate-limit,
+  throttle-scope, and audit-logging coverage, not an assumption that today's
+  coverage already applies.
 
 ## 4. CCT Production Backlog
 
@@ -101,17 +121,17 @@ future production infrastructure. Events are facts, not commands.
 | ID | Title | Area | Priority | Risk if not done | Dependency | Owner role | Suggested phase | Acceptance criteria |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | SEC-P0-001 | WAF / DDoS Protection | Security | P0 — production blocker | Public endpoints can be flooded or abused. | Edge platform | Security/Platform Engineer | Production Platform | WAF rules, DDoS protection, request body limits, bot controls, and alerting enabled. |
-| SEC-P0-002 | Global and Tenant-Aware Rate Limits | Security | P0 — production blocker | One tenant or actor can degrade shared service. | Rate limit middleware/edge | Security Engineer | Production Platform | Per-IP, per-user, per-tenant, upload-specific, and grading-submit limits. |
+| SEC-P0-002 | Global and Tenant-Aware Rate Limits | Security | P0 — production blocker | One tenant or actor can degrade shared service. | Rate limit middleware/edge | Security Engineer | Production Platform | Per-IP, per-user, per-tenant, upload-specific, and grading-submit limits. **Partial**: the one existing public endpoint (`parent/login/`) has an IP-scoped DRF throttle (`core/throttling.py`). No tenant-aware, per-user, or edge-level rate limiting exists yet, and no grading/upload endpoints exist yet to limit. |
 | SEC-P0-003 | Secret Rotation and Secrets Manager | Security | P0 — production blocker | Leaked or stale secrets may persist. | Secrets manager | Platform Engineer | Production Platform | Central secrets manager; rotation runbooks; no production secrets in repo or images. |
 | SEC-P0-004 | Admin Access Hardening | Security | P0 — production blocker | Admin access can bypass operational controls. | Identity/MFA | Security Engineer | Production Platform | MFA/step-up, least privilege, audit logs, IP/device policy, no shared admin accounts. |
-| SEC-P1-005 | Security Headers and CSP Policy | Security | P1 — required before national rollout | Browser clients may be exposed to injection or clickjacking. | Frontend/API deployment | Security Engineer | Production Platform | CSP, HSTS, X-Frame-Options/frame-ancestors, content-type sniffing protection, referrer policy. |
+| SEC-P1-005 | Security Headers and CSP Policy | Security | P1 — required before national rollout | Browser clients may be exposed to injection or clickjacking. | Frontend/API deployment | Security Engineer | Production Platform | CSP, HSTS, X-Frame-Options/frame-ancestors, content-type sniffing protection, referrer policy. **Partial**: HSTS, X-Frame-Options, nosniff, and referrer-policy were already set; `core.middleware.SecurityHeadersMiddleware` now adds a CSP, Permissions-Policy, and Cross-Origin-Resource-Policy for `/api/` responses. Django admin HTML pages are intentionally excluded and still need their own review. |
 | SEC-P1-006 | CSRF and Session Hardening Review | Security | P1 — required before national rollout | Session attacks may affect privileged workflows. | Auth/session design | Django Security Engineer | Production Platform | CSRF strategy, secure cookies, SameSite, session timeout, re-auth for critical actions. |
 | SEC-P1-007 | Audit Log Immutability | Security | P1 — required before national rollout | Audit evidence can be altered after disputes. | Audit store | Security/Compliance Lead | Production Platform | Append-only or tamper-evident audit trail; hash chaining or immutable storage policy. |
 | SEC-P1-008 | PII Retention Policy | Data Protection | P1 — required before national rollout | Sensitive learner data may be kept too long. | Legal/compliance review | Data Protection Lead | Data Governance | Retention periods by data class; deletion/archive rules; school exit process. |
 | SEC-P1-009 | Data Export Controls | Data Protection | P1 — required before national rollout | Bulk exports may leak learner data. | Export feature design | Security Engineer | Data Governance | Role gates, approval workflow, audit logs, rate limits, export expiration, watermarking where needed. |
 | SEC-P1-010 | Incident Response Runbooks | Operations | P1 — required before national rollout | Breaches or outages may be handled inconsistently. | On-call model | Incident Commander | Operations | Runbooks for tenant breach, upload abuse, grading integrity issue, event failure, data restore. |
 | SEC-P1-011 | SAST/DAST Strategy | Security | P1 — required before national rollout | Vulnerabilities may escape CI. | CI pipeline | Security Engineer | DevSecOps | SAST, dependency audit, DAST staging scans, false-positive triage, severity SLAs. |
-| SEC-P1-012 | Dependency Update Policy | Security | P1 — required before national rollout | Known CVEs may remain unresolved. | Package management | Platform Engineer | DevSecOps | Scheduled updates, audit triage, emergency patch process, lockfile review. |
+| SEC-P1-012 | Dependency Update Policy | Security | P1 — required before national rollout | Known CVEs may remain unresolved. | Package management | Platform Engineer | DevSecOps | Scheduled updates, audit triage, emergency patch process, lockfile review. **Active finding (2026-07-03)**: `pip-audit` currently reports `GHSA-537c-gmf6-5ccf` / `CVE-2026-34180` (moderate/high, published 2026-06-09) — `cryptography` wheels below 48.0.1 bundle a vulnerable statically-linked OpenSSL that OS-level patching cannot fix. The current pin (`cryptography = ">=46.0.7,<47.0"`) cannot reach the patched release. Remediation: bump the constraint to `>=48.0.1,<49.0` and run `poetry lock` from a Poetry/Python-3.11 environment (this repo's CI interpreter), then rerun Full/Deep Gate. Not fixed in this change because regenerating a correctly hashed `poetry.lock` requires that exact interpreter, which was not available in the environment this finding was made in — shipping a `pyproject.toml` edit without a matching lock update would break `poetry install` in CI. |
 | SEC-P1-013 | Threat Model Review | Security | P1 — required before national rollout | Critical attack paths may be missed. | Architecture docs | Security Architect | Security Closeout | Threat models for CCT, grading, events, identity, tenant isolation, uploads, reporting. |
 
 ## 8. Infrastructure and Scaling Backlog
@@ -136,9 +156,9 @@ future production infrastructure. Events are facts, not commands.
 
 | ID | Title | Area | Priority | Risk if not done | Dependency | Owner role | Suggested phase | Acceptance criteria |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| OBS-P0-001 | Structured Logs | Observability | P0 — production blocker | Incidents cannot be reconstructed reliably. | Logging platform | SRE | Observability | JSON logs with request ID, tenant ID where safe, actor ID where safe, event IDs, error class. |
-| OBS-P0-002 | Audit Logs | Observability | P0 — production blocker | Sensitive actions may lack forensic trace. | Audit event model | Security Engineer | Observability | Auth, CCT, grading, events, admin, export, upload, and governance actions audited. |
-| OBS-P0-003 | Application Metrics | Observability | P0 — production blocker | System health may be invisible. | Metrics platform | SRE | Observability | Request latency, error rate, DB latency, queue depth, worker health, cache health. |
+| OBS-P0-001 | Structured Logs | Observability | P0 — production blocker | Incidents cannot be reconstructed reliably. | Logging platform | SRE | Observability | **Application-layer DONE**: `structlog`-backed JSON logs with request ID, tenant schema, actor ID, event class (`core/observability.py`, `core/middleware.py`, `docs/OBSERVABILITY.md`). Still open: shipping to an external aggregation platform. |
+| OBS-P0-002 | Audit Logs | Observability | P0 — production blocker | Sensitive actions may lack forensic trace. | Audit event model | Security Engineer | Observability | Auth, CCT, grading, events, admin, export, upload, and governance actions audited. Parent-login attempts and rate-limit hits are now structured-logged (`core/security_events.py`); CCT/grading/admin/export audit coverage remains open. |
+| OBS-P0-003 | Application Metrics | Observability | P0 — production blocker | System health may be invisible. | Metrics platform | SRE | Observability | **Application-layer DONE for HTTP request metrics**: Prometheus counters/histograms for request rate, status code, and latency, plus a security-event counter, served fail-closed at `/api/observability/metrics/` (`core/metrics.py`, `docs/OBSERVABILITY.md`). Still open: DB/queue/worker/cache health metrics, and an actual scrape/dashboard platform. |
 | OBS-P1-004 | Domain Metrics | Observability | P1 — required before national rollout | Product-critical failures may hide inside generic metrics. | Domain events | Product/SRE | Observability | CCT metrics, grading metrics, event dispatch metrics, tenant activity, readiness metrics. |
 | OBS-P1-005 | Error Budgets and SLOs | Observability | P1 — required before national rollout | Reliability targets may be undefined. | Metrics platform | SRE Lead | Operations | SLOs for login, grading, CCT evidence, compilation, event dispatch, and dashboards. |
 | OBS-P1-006 | Alerts and Dashboards | Observability | P1 — required before national rollout | Operators may miss incidents. | Metrics/logging | SRE | Observability | Alerts for SLA breach, scan failure, event backlog, DB saturation, high error rate, security anomalies. |

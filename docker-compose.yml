@@ -43,6 +43,9 @@ x-django-environment: &django-environment
   OTEL_TRACES_EXPORTER: ${OTEL_TRACES_EXPORTER:-none}
   OTEL_METRICS_EXPORTER: ${OTEL_METRICS_EXPORTER:-none}
   PROMETHEUS_MULTIPROC_DIR: ${PROMETHEUS_MULTIPROC_DIR:-/tmp/prometheus}
+  # Leave unset to fail closed: /api/observability/metrics/ then 404s
+  # outside DEBUG. See docs/OBSERVABILITY.md.
+  METRICS_ACCESS_TOKEN: ${METRICS_ACCESS_TOKEN:-}
 
 services:
   postgres:

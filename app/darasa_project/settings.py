@@ -11,6 +11,8 @@ import environ
 from cryptography.fernet import Fernet
 from django.core.exceptions import ImproperlyConfigured
 
+from core.observability import build_structlog_formatters, configure_structlog
+
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -37,6 +39,9 @@ env = environ.Env(
     SERVER_EMAIL=(str, "server@darasa.ac.ke"),
     TENANT_PUBLIC_SCHEMA_NAME=(str, "public"),
     PG_EXTRA_SEARCH_PATHS=(list, []),
+    OTEL_TRACES_EXPORTER=(str, "none"),
+    OTEL_SERVICE_NAME=(str, "darasa-core"),
+    METRICS_ACCESS_TOKEN=(str, ""),
 )
 
 environ.Env.read_env(BASE_DIR / ".env")
@@ -233,7 +238,9 @@ INSTALLED_APPS = SHARED_APPS + [
 
 MIDDLEWARE = [
     "django_tenants.middleware.main.TenantMainMiddleware",
+    "core.middleware.RequestObservabilityMiddleware",
     "django.middleware.security.SecurityMiddleware",
+    "core.middleware.SecurityHeadersMiddleware",
     "corsheaders.middleware.CorsMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
@@ -340,6 +347,10 @@ REST_FRAMEWORK: dict[str, Any] = {
         "rest_framework.permissions.IsAuthenticated",
     ),
     "DEFAULT_RENDERER_CLASSES": ["rest_framework.renderers.JSONRenderer"],
+    "DEFAULT_THROTTLE_RATES": {
+        "anon": "60/min",
+        "parent_login": "5/min",
+    },
 }
 if DEBUG:
     REST_FRAMEWORK["DEFAULT_RENDERER_CLASSES"].append(
@@ -361,9 +372,23 @@ SIMPLE_JWT = {
 
 SPECTACULAR_SETTINGS = {
     "TITLE": "Darasa-Core API",
-    "DESCRIPTION": "Schema-per-tenant educational ERP API",
+    "DESCRIPTION": (
+        "Schema-per-tenant educational ERP API. The documented surface "
+        "reflects the real, currently-exposed HTTP endpoints only; the "
+        "grading, curriculum (CCT), and event-backbone domains are "
+        "intentionally service-layer only until their own HTTP contracts "
+        "are introduced in a dedicated phase."
+    ),
     "VERSION": "0.1.0",
     "SERVE_INCLUDE_SCHEMA": False,
+    # Outside DEBUG, only authenticated staff may browse the schema/Swagger
+    # UI: publishing full route/shape metadata to anonymous callers is an
+    # unnecessary reconnaissance surface in production.
+    "SERVE_PERMISSIONS": (
+        ["rest_framework.permissions.AllowAny"]
+        if DEBUG
+        else ["rest_framework.permissions.IsAdminUser"]
+    ),
 }
 
 CELERY_BROKER_URL = env("CELERY_BROKER_URL", default="redis://redis:6379/0")
@@ -423,6 +448,11 @@ EMAIL_HOST_PASSWORD = env("EMAIL_HOST_PASSWORD", default="")
 EMAIL_USE_TLS = True
 EMAIL_USE_SSL = False
 
+# structlog turns every `structlog.get_logger(...)` call (and, via the
+# stdlib LoggerFactory, every plain `logging.getLogger(...)` call) into
+# structured events. JSON in production/CI, readable console output locally.
+configure_structlog(debug=DEBUG)
+
 LOGGING: dict[str, Any] = {
     "version": 1,
     "disable_existing_loggers": False,
@@ -431,14 +461,20 @@ LOGGING: dict[str, Any] = {
             "format": "[{asctime}] {levelname} {name} schema={schema_name} {message}",
             "style": "{",
             "defaults": {"schema_name": "public"},
-        }
+        },
+        **build_structlog_formatters(debug=DEBUG),
     },
     "handlers": {
         "console": {
             "class": "logging.StreamHandler",
             "formatter": "standard",
             "level": env("DJANGO_LOG_LEVEL", default="INFO"),
-        }
+        },
+        "structured_console": {
+            "class": "logging.StreamHandler",
+            "formatter": "structlog",
+            "level": env("DJANGO_LOG_LEVEL", default="INFO"),
+        },
     },
     "loggers": {
         "django": {
@@ -447,13 +483,28 @@ LOGGING: dict[str, Any] = {
             "propagate": False,
         },
         "django.security": {
-            "handlers": ["console"],
+            "handlers": ["structured_console"],
             "level": "WARNING",
             "propagate": False,
         },
         "core": {"handlers": ["console"], "level": "INFO", "propagate": False},
         "tenant": {"handlers": ["console"], "level": "INFO", "propagate": False},
         "bus": {"handlers": ["console"], "level": "INFO", "propagate": False},
+        "darasa.request": {
+            "handlers": ["structured_console"],
+            "level": "INFO",
+            "propagate": False,
+        },
+        "darasa.security": {
+            "handlers": ["structured_console"],
+            "level": "INFO",
+            "propagate": False,
+        },
+        "darasa.tracing": {
+            "handlers": ["structured_console"],
+            "level": "INFO",
+            "propagate": False,
+        },
     },
 }
 
@@ -478,6 +529,15 @@ else:
     SECURE_SSL_REDIRECT = False
     SESSION_COOKIE_SECURE = False
     CSRF_COOKIE_SECURE = False
+
+# Observability: OpenTelemetry tracing stays disabled ("none") unless an
+# operator explicitly points it at a collector. See core/tracing.py.
+OTEL_TRACES_EXPORTER = env("OTEL_TRACES_EXPORTER", default="none")
+OTEL_SERVICE_NAME = env("OTEL_SERVICE_NAME", default="darasa-core")
+
+# Observability: Prometheus metrics endpoint access control. Empty token
+# means "closed" outside DEBUG/TESTING. See core/metrics.py.
+METRICS_ACCESS_TOKEN = env("METRICS_ACCESS_TOKEN", default="")
 
 if TESTING:
     ALLOWED_HOSTS = list(dict.fromkeys(ALLOWED_HOSTS + ["testserver", "localhost"]))
