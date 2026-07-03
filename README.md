@@ -189,6 +189,7 @@ when using Compose.
 
 | Doc | What it covers |
 | --- | --- |
+| [`docs/PRODUCT_VISION.md`](docs/PRODUCT_VISION.md) | The national-scale, CBC-native, "everyday tool" product target that architecture decisions are made against |
 | [`docs/ARCHITECTURE_PHASES.md`](docs/ARCHITECTURE_PHASES.md) | Full phase-by-phase build history and active boundary rules |
 | [`docs/API_DOCUMENTATION.md`](docs/API_DOCUMENTATION.md) | The real (small) HTTP surface, honestly scoped |
 | [`docs/OBSERVABILITY.md`](docs/OBSERVABILITY.md) | Structured logging, metrics, tracing — what's wired vs. backlog |

@@ -4,6 +4,12 @@ Darasa-Core is being built as a phased multi-tenant academic ERP. Each phase
 adds one architectural layer and keeps future layers inactive until their
 migrations, policies, and tests are intentional.
 
+See `docs/PRODUCT_VISION.md` for the national-scale (tens of thousands of
+Kenyan schools with widely varying capacity), CBC-native, "everyday tool for
+teachers/administration/principals/deputies" target these phase boundaries
+are drawn against. That vision explains *why* boundaries are placed where
+they are; this document records *what* has actually been built.
+
 ## Completed Foundations
 
 Phase 1 established the Docker, Poetry, CI, lint, security, smoke-test, and
