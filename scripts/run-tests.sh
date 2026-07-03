@@ -7,12 +7,12 @@ shift || true
 PYTEST_CONFIG_ARGS=()
 PYTEST_COMMAND=(pytest)
 DEFAULT_MARKER_EXPRESSION="not chaos and not integration and not future"
-# PyJWT PYSEC-2025-183 / CVE-2025-45768 is a disputed no-fixed-version
-# advisory about application-selected key strength. Keep this exception narrow:
-# pip-audit must still fail on every other vulnerability.
-PIP_AUDIT_IGNORE_ARGS=(
-  --ignore-vuln PYSEC-2025-183
-)
+# The PyJWT PYSEC-2025-183 / CVE-2025-45768 exception was removed on
+# 2026-07-03: PyJWT 2.13.0 (see poetry.lock) no longer triggers this
+# advisory, so pip-audit runs with zero ignored vulnerabilities. Do not
+# reintroduce an ignore here without a matching, dated justification in
+# docs/TESTING_STRATEGY.md.
+PIP_AUDIT_IGNORE_ARGS=()
 
 if [ -f "/workspace/pyproject.toml" ]; then
   cd /workspace

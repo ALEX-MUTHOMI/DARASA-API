@@ -145,17 +145,27 @@ hand-editing every file.
 Do not mark a test `slow` to hide a failure. Security-critical tests must stay
 reachable through a Domain Gate or Deep Gate.
 
-`pip-audit` runs with one narrow documented exception:
-`PYSEC-2025-183` / `CVE-2025-45768` for PyJWT. The advisory is disputed,
-currently has no fixed version, and concerns application-selected JWT key
-strength. Darasa must continue enforcing strong JWT signing secrets through
-configuration and secret-management policy. Any other dependency advisory must
-fail the gate.
+`pip-audit` runs with zero ignored vulnerabilities. Any dependency advisory
+must fail the gate.
 
-Review the PyJWT exception before production release and during dependency
-update cycles. If a fixed PyJWT release becomes available, remove the ignore
-from `scripts/run-tests.sh`, update the lockfile, and rerun Full and Deep
-Gates.
+`pip-audit` previously carried one narrow, documented exception —
+`PYSEC-2025-183` / `CVE-2025-45768` for PyJWT, a disputed advisory about
+application-selected JWT key strength. That exception was removed on
+2026-07-03 after a routine dependency-update cycle upgraded PyJWT to 2.13.0
+(via `djangorestframework-simplejwt`), which no longer triggers the advisory.
+The same cycle also resolved a then-active `cryptography` advisory
+(`GHSA-537c-gmf6-5ccf` / `CVE-2026-34180`, vulnerable OpenSSL bundled in
+wheels before 48.0.1) by raising the `cryptography` constraint to
+`>=48.0.1,<49.0`, plus routine transitive bumps to `django` (5.2.15), 
+`msgpack` (1.2.1), and `pip` (26.1.2) that were already permitted by existing
+constraints but not yet reflected in the lockfile. Darasa must continue
+enforcing strong JWT signing secrets through configuration and
+secret-management policy regardless of PyJWT version.
+
+Re-review this section during every dependency-update cycle. If `pip-audit`
+starts failing again, either fix the dependency (preferred) or add a new,
+narrow, dated exception here and in `scripts/run-tests.sh` with a specific
+justification — never a blanket or permanent ignore.
 
 ## Performance Safety
 
