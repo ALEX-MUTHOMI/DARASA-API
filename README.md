@@ -201,6 +201,7 @@ when using Compose.
 | [`docs/security/OWASP_CICD_AUDIT_AND_INFRA_CHECKLIST.md`](docs/security/OWASP_CICD_AUDIT_AND_INFRA_CHECKLIST.md) | OWASP CI/CD Top 10 audit of the GitHub Actions pipeline itself |
 | [`docs/security/ZAP_DAST_STRATEGY.md`](docs/security/ZAP_DAST_STRATEGY.md) | Dynamic (OWASP ZAP) security testing: what's real today, what CCT needs before it's dynamically testable |
 | [`docs/ROADMAP_TO_PRODUCTION.md`](docs/ROADMAP_TO_PRODUCTION.md) | The phased plan for what's left between now and national production rollout |
+| [`docs/CCT_NATIONAL_COVERAGE_PLAN.md`](docs/CCT_NATIONAL_COVERAGE_PLAN.md) | How CCT stops depending on any one school's upload diligence — multi-channel evidence intake, crowd corroboration, and scoped fan-out |
 | [`docs/adr/`](docs/adr/) | Architecture Decision Records for key trade-offs |
 
 ## Boundary

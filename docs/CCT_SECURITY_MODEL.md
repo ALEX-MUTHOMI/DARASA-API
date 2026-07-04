@@ -170,6 +170,18 @@ Phase 4C focuses on Senior School impact and tracks Junior-to-Senior signals
 only when they affect Senior School readiness, transition, pathways, assessment
 guidance, or teacher readiness. It does not build a Junior School product layer.
 
+## National Coverage and Distribution (Planning)
+
+`docs/CCT_NATIONAL_COVERAGE_PLAN.md` (Phase 7B.1) plans how CCT stops
+depending on any single school's upload diligence — multiple evidence
+ingestion channels (WhatsApp, SMS, trusted liaisons), crowd corroboration
+via existing evidence fingerprint clustering, and scoped fan-out of
+governance-approved publications to every matching tenant, not only the
+original submitter. Every mechanism in that plan terminates in the same
+quarantine → verification → governance → publication → adoption pipeline
+described above; none of it introduces a second truth path or an
+autonomous fetch.
+
 ## Dynamic Security Testing
 
 CCT has no HTTP endpoints today (see `docs/API_DOCUMENTATION.md`), so

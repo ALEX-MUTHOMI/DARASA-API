@@ -56,6 +56,42 @@ specific pieces of future work. This roadmap keeps those numbers and fills
 in the previously-unnamed 7B, 8, and 12 consistently with them — it does not
 renumber anything already referenced elsewhere in the docs.
 
+## Phase 7B.1 — CCT National Coverage and Distribution Network
+
+**Scope:** Full detail in `docs/CCT_NATIONAL_COVERAGE_PLAN.md`. Summary:
+multiplies how curriculum/regulatory evidence can reach CCT (WhatsApp 1:1
+ingestion, SMS declarations, county/sub-county trusted liaisons) beyond a
+single school's web upload; turns existing cross-tenant evidence
+fingerprint clustering into an explicit reviewer-facing corroboration
+signal; fans out governance-approved publications to every tenant matching
+the verified scope, not only the original submitter; adds a bottom-up
+teacher-retooling feedback signal alongside the existing top-down
+`TeacherReadinessRequirement`; widens evidence categories to school
+calendar/co-curricular events (drama/music festivals, term dates), not just
+curriculum circulars; adds proactive nudges for known recurring events; and
+adds a coverage dashboard (reusing the Phase 6D readiness-dashboard
+pattern) to drive rollout sequencing.
+
+**Why this exists as a distinct phase from 7B:** 7B makes the upload
+pipeline itself production-safe (storage, malware scanning, content
+verification). 7B.1 makes the *network* of who can reach that pipeline, and
+who benefits once one school does, far larger than "the one principal who
+happened to upload something" — a real, confirmed gap (upload-only
+ingestion depends entirely on individual diligence) rather than a
+hypothetical one.
+
+**Dependencies:** Phase 7B's storage/scanning infrastructure (evidence
+needs the same production handling regardless of which channel it arrived
+through). Introduces a new shared messaging platform (SMS/WhatsApp via a
+Kenya-based provider) that is explicitly *not* CCT-specific — it is
+reusable by future daily-engagement features (see the Staff Attendance note
+below).
+
+**Must not do:** Let crowd-corroboration signals (document clustering or
+teacher retooling reports) lower the bar for governance approval — they are
+prioritization signals only, never truth signals. Must not put schools into
+a shared WhatsApp group (see `docs/CCT_NATIONAL_COVERAGE_PLAN.md` for why).
+
 ## Phase 7B — CCT Production Upload Infrastructure
 
 **Scope:** `CCT-P0-001` through `CCT-P0-008` in the backlog — private object
@@ -172,6 +208,23 @@ which already exists.
 explicitly "groundwork" (one real screen, proving the API contract works
 end-to-end for a real workflow) before Phase 12 commits to a full client.
 
+## Flagged Future Phase (not yet numbered) — Staff Attendance and Daily Operations
+
+Darasa's product vision is to run a school's day-to-day academic
+operations, not only grading and curriculum. **Teacher/staff attendance
+does not exist in Darasa today** — this is stated explicitly rather than
+implied, since it is easy to assume broader coverage than actually exists.
+It is deliberately not folded into CCT or any currently-numbered phase; it
+is flagged here so it is tracked rather than lost.
+
+The architecturally relevant point: the SMS/WhatsApp messaging platform
+built for Phase 7B.1 (phone-to-user binding, Utility-template messaging, a
+nudge-engine pattern) is directly reusable for this — a teacher "reply
+PRESENT" via SMS or a daily WhatsApp check-in nudge uses the same plumbing
+as a CCT training-window nudge. This phase should be scoped once Phase 10
+(API layer) exists and should explicitly reuse Phase 7B.1's messaging
+platform rather than building a second one.
+
 ## Phase 12 — Frontend Web Client and Parent Portal Groundwork
 
 **Scope:** A real web client covering the role-shaped views
@@ -252,10 +305,12 @@ and for the roadmap as a whole.
 | Phase | Name | Primary dependency |
 | --- | --- | --- |
 | 7B | CCT Production Upload Infrastructure | None — start now |
+| 7B.1 | CCT National Coverage and Distribution Network (`docs/CCT_NATIONAL_COVERAGE_PLAN.md`) | Phase 7B's storage/scanning infrastructure |
 | 8 | Report Rendering and Delivery | Phase 7A (done) |
 | 9 | Safe NLP Boundary | Phase 8; recommend building after Phase 10 in practice |
 | 10 | API / Integration Contract Suite | None structurally — highest leverage, start early |
 | 11 | Domain Observability Hooks + Frontend Groundwork | Phase 10 |
+| *(unnumbered, flagged)* | Staff Attendance and Daily Operations | Phase 10; reuses Phase 7B.1's messaging platform |
 | 12 | Frontend Web Client + Parent Portal Groundwork | Phases 10, 11 |
 | 13 | Edge Security Design (WAF, scaled rate limiting) | Phase 10 |
 | 14 | Performance Baseline and National-Scale Proof | Phases 10, 11 |
