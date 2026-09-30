@@ -5,7 +5,7 @@
 # Validation). Digest verified against the `python:3.11-slim-bookworm` tag on
 # 2026-07-03; Dependabot's "docker" ecosystem entry in
 # .github/dependabot.yml keeps this current going forward.
-FROM python:3.11-slim-bookworm@sha256:721dc13fd1be0a771e54b72097634291d628d0007dee9da777e2ce676a9c998f AS base
+FROM python:3.14-slim-bookworm@sha256:4ff4b92a68355dbdb52584ab3391dff8d371a61d4e063468bfd0130e3189c6d9 AS base
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
